@@ -269,6 +269,7 @@ def _times(item: dict) -> dict:
 
 def _wipe(conn) -> None:
     for table in (
+        "party_scans",
         "outbound_messages",
         "tasks",
         "documents",

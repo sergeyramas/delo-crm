@@ -3,38 +3,11 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 
+from tests.conftest import SECRET
+
 ROOT = Path(__file__).resolve().parents[1]
-SECRET = "test-inbound-secret-value"
-
-
-@pytest.fixture()
-def env(tmp_path, monkeypatch):
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("SQLITE_PATH", str(tmp_path / "delo.db"))
-    monkeypatch.setenv("INBOUND_SECRET", SECRET)
-    monkeypatch.setenv("AUTH_MODE", "off")
-    monkeypatch.setenv("NOTIFY_TG", "0")
-    monkeypatch.setenv("MESSENGER_CHECK", "off")
-    monkeypatch.delenv("TG_BOT_TOKEN", raising=False)
-    monkeypatch.delenv("TG_CHAT_ID", raising=False)
-    monkeypatch.delenv("UI_PASSWORD", raising=False)
-    monkeypatch.delenv("UI_USER", raising=False)
-    monkeypatch.delenv("UI_GATE_SECRET", raising=False)
-    monkeypatch.delenv("MESSENGER_TG_TOKEN", raising=False)
-    monkeypatch.delenv("MESSENGER_WA_TOKEN", raising=False)
-    monkeypatch.delenv("MESSENGER_MAX_TOKEN", raising=False)
-    monkeypatch.delenv("DELO_USER_SERGEY_PASSWORD", raising=False)
-    monkeypatch.delenv("DELO_USER_ANDREY_PASSWORD", raising=False)
-
-
-@pytest.fixture()
-def client(env):
-    from app.main import create_app
-
-    return TestClient(create_app())
 
 
 def _post(client, payload, secret=SECRET):
@@ -292,6 +265,9 @@ def test_seed_matches_mock_counts(env):
     assert "Статус пакета: Подписано · podpisano" in card.text
     assert "Карточка заказчика" in card.text
     assert "Карточка водителя" in card.text
+    assert "нет СТС" in card.text
+    assert "нет прав" in card.text
+    assert "нет паспорта" in card.text
     client_party = local.app.state.db.one("SELECT id FROM parties WHERE inn_key = ?", ("7701123456",))
     assert client_party
     profile = local.get(f"/parties/{client_party['id']}")
@@ -308,6 +284,9 @@ def test_seed_matches_mock_counts(env):
     driver_page = local.get(f"/parties/{driver['id']}")
     assert "Водительское удостоверение" in driver_page.text
     assert "А123ВС 777" in driver_page.text
+    assert "Сканы для пакета заказчику" in driver_page.text
+    assert "нет СТС" in driver_page.text
+    assert "Загрузить СТС" in driver_page.text
     feed = local.get("/packages/Д-2026-0001/feed")
     assert "Бот ATI" in feed.text
     assert "Письма" in feed.text
@@ -416,6 +395,7 @@ def test_upsert_links_client_carrier_driver(client):
     assert kept["phone_key"] == "79031112233"
     other_row = db.one("SELECT client_id FROM packages WHERE number = ?", (other["number"],))
     assert other_row["client_id"] != clients[0]["id"]
+    assert db.one("SELECT COUNT(*) AS n FROM party_scans")["n"] == 0
 
 
 def test_messenger_write_is_gated(tmp_path, monkeypatch):

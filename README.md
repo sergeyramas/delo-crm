@@ -99,6 +99,8 @@ curl -sS -H "Content-Type: application/json" \
 | GET | `/s/packages/{id}` | карточка и события; `{id}` — число или номер `Д-2026-0001` |
 | PATCH | `/s/packages/{id}` | поля и статус, без почты |
 | POST | `/s/packages/{id}/events` | заметка или файл (`type`: `mail_in`, `mail_out`, `tg`, `status`, `note`, `file`) |
+| GET | `/api/packages/{id}/client-attachments` | список вложений пакета заказчику: карточка организации, если файл уже есть, и сканы водителя |
+| GET | `/api/packages/{id}/client-attachments/{type}` | сам файл (`org_card`, `sts`, `license`, `passport`) |
 
 Отказ (`otkaz`) без комментария — `422`. Вложение `content_base64` пишется на диск (до 8 МБ). Ссылку `url` CRM сохраняет и не скачивает.
 
@@ -140,6 +142,36 @@ curl -sS -H "Content-Type: application/json" \
 
 Поля заявки: `client_name`, `client_contact`, `client_phone`, `client_email`, `client_inn`, `client_company`, `carrier_name`, `carrier_phone`, `carrier_email`, `carrier_inn`, `carrier_contract`, `driver_name`, `driver_phone`, `driver_email`, `vehicle`, `plate`, `license_no` (или `driver_license`), `passport_no` (или `driver_passport`). Плюс прежние `client_hint` и `from`.
 
+Заявка пишет только эти поля. Сканы СТС, прав и паспорта она не загружает и не скачивает.
+
+## Сканы водителя
+
+На карточке водителя три файла: `sts` (СТС машины, которая записана на этой карточке: авто и госномер), `license` (права), `passport` (паспорт). Грузят руками с экрана. Повторная загрузка того же типа заменяет файл, старый с диска удаляется.
+
+В метаданных скана остаётся госномер и авто на момент загрузки. Если номер на карточке потом сменили, подпись у уже лежащего файла не переписывается — чтобы заменить, загрузите скан ещё раз.
+
+Если скана нет, на карточке водителя и на карточке сделки жёлто-красный бейдж: «нет СТС», «нет прав», «нет паспорта». Когда файл есть — «СТС есть» и так далее.
+
+Формат: PDF, JPG или PNG, не больше 12 МиБ. Содержимое сверяется с расширением. Превью сервер не строит.
+
+Карточка организации в этот набор не входит. Это обычный файл сделки, у которого название или имя файла начинается с «Карточка организации» (так и подписывайте в форме «Файл в пакет»). «Карточка перевозчика» сюда не попадает.
+
+## Пакет заказчику
+
+CRM письмо не отправляет. Воркер Hermes забирает список уже лежащих файлов и скачивает их сам.
+
+```sh
+curl -sS -H "X-Inbound-Secret: $INBOUND_SECRET" \
+  "http://127.0.0.1:8091/api/packages/Д-2026-0001/client-attachments"
+curl -sS -H "X-Inbound-Secret: $INBOUND_SECRET" \
+  -o sts.pdf \
+  "http://127.0.0.1:8091/api/packages/Д-2026-0001/client-attachments/sts"
+```
+
+`{id}` в пути — номер `Д-2026-0001` или числовой id. Ответ: `attachments` (только то, что уже есть) и `missing` (`sts`, `license`, `passport`, если файла нет). У каждого вложения есть `type`, `filename`, `size`, `content_type`, `download_url`. Типы: `org_card`, `sts`, `license`, `passport`. Скачивание — тот же URL с типом на конце, тело файла, `Content-Disposition: attachment`.
+
+Вход на `/api/*` такой же, как на экраны (`AUTH_MODE`), либо заголовок `X-Inbound-Secret`, если секрет длиннее 16 символов. Секрет в query не принимается. Сканы с экрана (`/parties/{id}/scans/...`) секрет шлюза не открывает: их смотрят только после входа в UI. Через nginx `/api/` сидит под тем же паролем, что и экраны. Воркер на Ядре ходит мимо nginx, на `http://127.0.0.1:8091`, с секретом.
+
 ## Мессенджеры
 
 По телефону карточка ставит отметку Telegram, WhatsApp, MAX: «есть», «нет» или «неизвестно». Кнопка «Написать» сама ничего не отправляет.
@@ -159,6 +191,8 @@ curl -sS -H "Content-Type: application/json" \
 | | Путь |
 |---|---|
 | База и файлы, основной | `/srv/delo-crm/` (`delo.db`, каталог `files/`) |
+| Сканы водителя | `$DATA_DIR/files/parties/<id>/<тип>_<uuid>.pdf` (или `.jpg` / `.png`) |
+| Метаданные сканов | таблица `party_scans` в `delo.db` |
 | То же, если удобнее дерево ati | `/srv/ati/delo-crm/` |
 | Секреты приложения | `/root/ati/secrets/delo-crm.env` (mode `600`) |
 | Пароли Сергея и Андрея | `/root/ati/secrets/delo-crm-auth.env` (mode `600`) |
@@ -204,6 +238,12 @@ sudo htpasswd -c /srv/ati/secrets/delo-crm.htpasswd andrey
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
+После обновления кода достаточно перезапустить сервис: таблица `party_scans` создаётся при старте, отдельный SQL не нужен. Каталог `files/parties/` появится при первой загрузке скана. Сканы в git не коммитить и в `/srv` руками из репозитория не копировать — только через экран карточки водителя. В nginx `client_max_body_size 16m` (файл до 12 МиБ плюс форма).
+
+```sh
+sudo systemctl restart delo-crm
+```
+
 Проверка с Ядра:
 
 ```sh
@@ -227,7 +267,7 @@ curl -sS -H "Content-Type: application/json" \
 | `BACKLOG` | очередь сокета | `16` |
 | `DATA_DIR` | каталог файлов | пусто → `./data` |
 | `SQLITE_PATH` | файл базы | пусто → `$DATA_DIR/delo.db` |
-| `INBOUND_SECRET` | секрет `/s/*` | пусто |
+| `INBOUND_SECRET` | секрет `/s/*` и `/api/*` | пусто |
 | `AUTH_MODE` | `off`, `basic`, `proxy` | `off` |
 | `UI_USER` | логин basic | пусто |
 | `UI_PASSWORD` | пароль basic | пусто |
@@ -247,4 +287,4 @@ curl -sS -H "Content-Type: application/json" \
 
 ## Чего в этой версии нет
 
-SMTP, автоподпись, разбор PDF в поля, оплата, новый VPS, перенос Telegram, IMAP, боевые токены MAX и WhatsApp. Входящее письмо позже может прислать воркер Вишну тем же `POST /s/inbound/doc`. Проверка мессенджеров и отправка в Telegram с карточки — заглушка, см. выше.
+SMTP, автоподпись, разбор PDF и сканов в поля, оплата, новый VPS, перенос Telegram, IMAP, боевые токены MAX и WhatsApp. Входящее письмо позже может прислать воркер Вишну тем же `POST /s/inbound/doc`. Список файлов пакета заказчику он забирает `GET /api/packages/{id}/client-attachments` и скачивает сам. Проверка мессенджеров и отправка в Telegram с карточки — заглушка, см. выше.

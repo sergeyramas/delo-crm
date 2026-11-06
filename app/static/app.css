@@ -75,6 +75,11 @@ input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px soli
 .badge.yes{background:#16a34a}
 .badge.no{background:#b91c1c}
 .badge.unknown{background:#64748b}
+.badge.missing{background:#fef3c7;color:#b91c1c;border:1px solid #b45309}
+.scans{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+fieldset.scan{border:0;border-top:1px solid #f1f5f9;margin:0 0 8px;padding:12px 0 0}
+fieldset.scan legend{font-weight:700;padding:0}
+input[type=file]{font:16px/1.4 Inter,Arial,sans-serif;max-width:100%;min-height:44px}
 .btn.small{padding:8px 14px;font-size:14px}
 .deals{list-style:none;padding:0;margin:0}
 .pager{display:flex;gap:16px;align-items:center;margin-top:12px;flex-wrap:wrap}

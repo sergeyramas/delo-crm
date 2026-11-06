@@ -32,6 +32,17 @@
       {% endif %}
       {% if party.note %}<dt>Заметка</dt><dd>{{ party.note }}</dd>{% endif %}
     </dl>
+    {% if party.kind == 'driver' %}
+    <div class="scans" aria-label="Каких сканов нет">
+      {% for scan in scans %}
+        {% if scan.present %}
+        <span class="badge yes">{{ scan.label }} есть</span>
+        {% else %}
+        <span class="badge missing">{{ scan.missing_label }}</span>
+        {% endif %}
+      {% endfor %}
+    </div>
+    {% endif %}
   </div>
   <div class="card">
     <h2>Мессенджеры</h2>
@@ -75,6 +86,41 @@
     {% endfor %}
   </ul>
 </div>
+{% if party.kind == 'driver' %}
+<div class="card">
+  <h2 id="scans-title">Сканы для пакета заказчику</h2>
+  <p class="mut" id="scans-help">
+    СТС{% if party.vehicle %} машины {{ party.vehicle }}{% endif %}{% if party.plate %}, госномер {{ party.plate }}{% endif %},
+    водительские права и паспорт. Файл лежит на диске CRM. Заявка его сама не прикладывает, почта из CRM не уходит.
+  </p>
+  {% for scan in scans %}
+  <form method="post" action="/parties/{{ party.id }}/scans" enctype="multipart/form-data">
+    <fieldset class="scan">
+      <legend>{{ scan.label }}</legend>
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="kind" value="{{ scan.kind }}">
+      {% if back_id %}<input type="hidden" name="from" value="{{ back_id }}">{% endif %}
+      {% if scan.present %}
+      <p>
+        <span class="badge yes">есть</span>
+        {{ scan.original_name }}
+        <span class="mut">· {{ scan.size_label }}{% if scan.plate %} · {{ scan.plate }}{% endif %}</span>
+        <a class="dl" href="/parties/{{ party.id }}/scans/{{ scan.kind }}">Открыть</a>
+        <a class="dl" href="/parties/{{ party.id }}/scans/{{ scan.kind }}?download=1">Скачать</a>
+      </p>
+      {% else %}
+      <p><span class="badge missing">{{ scan.missing_label }}</span></p>
+      {% endif %}
+      <div class="field">
+        <label for="scan-{{ scan.kind }}">Файл PDF, JPG или PNG, до 12 МБ</label>
+        <input id="scan-{{ scan.kind }}" name="file" type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" required aria-describedby="scans-help">
+      </div>
+      <p><button class="btn" type="submit">{% if scan.present %}Заменить {{ scan.label }}{% else %}Загрузить {{ scan.label }}{% endif %}</button></p>
+    </fieldset>
+  </form>
+  {% endfor %}
+</div>
+{% endif %}
 {% if messages %}
 <div class="card">
   <h2>Исходящие из CRM</h2>

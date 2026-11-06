@@ -5,6 +5,7 @@ __pycache__/
 *.pyc
 .pytest_cache/
 data/
+files/
 *.db
 *.db-*
 *.sqlite

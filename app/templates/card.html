@@ -94,6 +94,21 @@
           <b>{% if p.driver_party_id %}<a href="/parties/{{ p.driver_party_id }}?from={{ p.id }}">{{ p.driver_name or "Карточка водителя" }}</a>{% else %}{{ p.driver_name or "—" }}{% endif %}</b>
           <div class="mut">{{ p.driver_channel or "—" }}{% if p.plate %} · {{ p.plate }}{% endif %}{% if p.vehicle %} · {{ p.vehicle }}{% endif %}{% if p.driver_phone %} · {{ p.driver_phone }}{% endif %}</div>
           {% if p.driver_party_id %}<div class="src"><a href="/parties/{{ p.driver_party_id }}?from={{ p.id }}">Карточка водителя</a></div>{% endif %}
+          <div class="scans" aria-label="Сканы водителя для пакета заказчику">
+            {% for scan in driver_scans %}
+              {% if scan.present %}
+              <span class="badge yes">{{ scan.label }} есть</span>
+              {% else %}
+              <span class="badge missing">{{ scan.missing_label }}</span>
+              {% endif %}
+            {% endfor %}
+          </div>
+          {% if org_card %}
+          <p class="src">Карточка организации приложена: <a class="dl" href="/files/{{ org_card.file_id }}">{{ org_card.filename }}</a></p>
+          {% else %}
+          <p class="src">Карточка организации не приложена. Она войдёт в пакет заказчику, если файл в сделке назван «Карточка организации».</p>
+          {% endif %}
+          <p class="src">В пакет заказчику идут карточка организации, если она уже есть, и загруженные сканы. Письмо CRM не отправляет.</p>
         </div>
       </div>
     </div>
@@ -209,6 +224,7 @@
       <div class="field"><label for="file-title">Название</label><input id="file-title" name="title" type="text" maxlength="200"></div>
       <div class="field"><label for="file-note">Пояснение</label><input id="file-note" name="note" type="text" maxlength="500"></div>
       <div class="field"><label for="file">Файл, до 8 МБ</label><input id="file" name="file" type="file" required></div>
+      <p class="mut">Чтобы файл вошёл в пакет заказчику как карточка организации, назовите его «Карточка организации».</p>
       <p><button class="btn" type="submit">Приложить файл</button></p>
     </form>
   </div>

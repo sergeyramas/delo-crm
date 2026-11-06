@@ -6,6 +6,7 @@ import hmac
 import json
 
 from fastapi import APIRouter, Request
+from fastapi.responses import FileResponse
 
 from app.logic import ApiError, apply_patch, create_inbound, detail, list_packages
 
@@ -18,6 +19,18 @@ def _eq(left: str, right: str) -> bool:
     if len(left) != len(right):
         return False
     return hmac.compare_digest(left, right)
+
+
+def inbound_ok(request: Request) -> bool:
+    """Секрет шлюза только из заголовка. В query и в теле GET его нет."""
+    settings = request.app.state.settings
+    secret = settings.inbound_secret
+    if len(secret) < MIN_SECRET:
+        return False
+    header = request.headers.get("x-inbound-secret", "")
+    if not header or len(header) != len(secret):
+        return False
+    return _eq(header, secret)
 
 
 def require_secret(request: Request, payload: dict | None = None) -> None:
@@ -141,4 +154,25 @@ async def package_event(request: Request, key: str):
         payload.get("title") or "",
         {"group": payload.get("group")} if payload.get("group") else None,
         [a for a in attachments if isinstance(a, dict) and not a.get("content_base64") and not a.get("base64")],
+    )
+
+
+@router.get("/api/packages/{key}/client-attachments")
+def client_attachments_list(request: Request, key: str):
+    from app.scans import client_attachments
+
+    return client_attachments(request.app.state.db, key)
+
+
+@router.get("/api/packages/{key}/client-attachments/{kind}")
+def client_attachments_file(request: Request, key: str, kind: str):
+    from app.scans import open_client_attachment
+
+    path, name, media = open_client_attachment(request.app.state.db, key, kind)
+    return FileResponse(
+        path,
+        media_type=media,
+        filename=name,
+        content_disposition_type="attachment",
+        headers={"Cache-Control": "private, no-store"},
     )

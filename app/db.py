@@ -184,6 +184,20 @@ CREATE INDEX IF NOT EXISTS idx_parties_kind_inn ON parties(kind, inn_key);
 CREATE INDEX IF NOT EXISTS idx_parties_kind_phone ON parties(kind, phone_key);
 CREATE INDEX IF NOT EXISTS idx_parties_kind_email ON parties(kind, email_key);
 CREATE INDEX IF NOT EXISTS idx_outbound_party ON outbound_messages(party_id, id);
+
+CREATE TABLE IF NOT EXISTS party_scans (
+    id INTEGER PRIMARY KEY,
+    party_id INTEGER NOT NULL REFERENCES parties(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,
+    stored_name TEXT NOT NULL,
+    original_name TEXT NOT NULL,
+    content_type TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    plate TEXT NOT NULL DEFAULT '',
+    vehicle TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    UNIQUE(party_id, kind)
+);
 """
 
 
