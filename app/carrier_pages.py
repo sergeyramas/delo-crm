@@ -86,6 +86,43 @@ async def _maybe_file(form, name: str) -> tuple[str, bytes]:
     return getattr(upload, "filename", "") or "file", await _read_upload(upload)
 
 
+def _locked_carrier(carriers: list[dict], raw: str) -> dict | None:
+    if not str(raw).isdigit():
+        return None
+    wanted = int(raw)
+    for item in carriers:
+        if item["id"] == wanted:
+            return item
+    return None
+
+
+def _same_carrier(form, carrier_id: int) -> None:
+    raw = _form_last(form, "carrier_id").strip()
+    if not raw:
+        return
+    posted = _opt(form, "carrier_id")
+    if posted != carrier_id:
+        raise ApiError(422, "Запись добавляется к этому перевозчику.")
+
+
+def _store_driver_scans(conn, data_dir, carrier_id: int, driver_id: int, passport_name: str, passport: bytes, license_name: str, license_blob: bytes, moment: str) -> None:
+    if passport:
+        save_fleet_file(
+            conn, data_dir, carrier_id, "passport", passport_name, passport, moment, driver_id=driver_id,
+        )
+    if license_blob:
+        save_fleet_file(
+            conn, data_dir, carrier_id, "license", license_name, license_blob, moment, driver_id=driver_id,
+        )
+
+
+def _store_vehicle_scan(conn, data_dir, carrier_id: int, vehicle_id: int, filename: str, blob: bytes, moment: str) -> None:
+    if blob:
+        save_fleet_file(
+            conn, data_dir, carrier_id, "sts", filename, blob, moment, vehicle_id=vehicle_id,
+        )
+
+
 def _after(conn, form, kind: str, new_id: int, carrier_id: int | None, moment: str) -> str:
     from app.carriers import attach_newcomer
 
@@ -94,15 +131,12 @@ def _after(conn, form, kind: str, new_id: int, carrier_id: int | None, moment: s
         package = open_package(conn, nxt.rsplit("/", 1)[-1])
         attach_newcomer(conn, package, kind, new_id, moment)
         return nxt + "?note=saved#haul"
-    if nxt.startswith("/carriers/") and kind in {"vehicle", "driver"}:
-        tab = "drivers" if kind == "driver" else "vehicles"
-        return f"{nxt}?tab={tab}&note=saved"
     if kind == "carrier":
         return f"/carriers/{new_id}?note=saved"
-    if kind == "vehicle":
-        return f"/carriers/{carrier_id}?tab=vehicles&note=saved"
-    if kind == "driver":
-        return f"/carriers/{carrier_id}?tab=drivers&note=saved"
+    if kind == "vehicle" and carrier_id:
+        return f"/carriers/{carrier_id}/vehicles/{new_id}?note=saved"
+    if kind == "driver" and carrier_id:
+        return f"/carriers/{carrier_id}/drivers/{new_id}?note=saved"
     return "/clients?note=saved"
 
 
@@ -166,13 +200,15 @@ def page_vehicles(request: Request):
 
 @router.get("/vehicles/new")
 def page_vehicle_new(request: Request):
-    carrier_id = request.query_params.get("carrier_id", "")
+    raw = request.query_params.get("carrier_id", "")
     with request.app.state.db.tx() as conn:
         carriers = list_carriers(conn, "", limit=100)
+    locked = _locked_carrier(carriers, raw)
     ctx = base_ctx(request, "carriers")
     ctx.update({
         "carriers": carriers,
-        "carrier_id": int(carrier_id) if str(carrier_id).isdigit() else None,
+        "carrier_id": locked["id"] if locked else None,
+        "locked_carrier": locked,
         "next": safe_next(request.query_params.get("next", "")),
     })
     return templates.TemplateResponse(request, "vehicle_new.html", ctx)
@@ -181,24 +217,23 @@ def page_vehicle_new(request: Request):
 @router.post("/vehicles")
 async def page_vehicle_new_save(request: Request):
     form = await request.form()
+    back = "/vehicles/new"
     try:
         check_csrf(request, form.get("csrf"))
         require_writer(request)
         carrier_id = _opt(form, "carrier_id")
+        if carrier_id:
+            back = f"/vehicles/new?carrier_id={carrier_id}"
         if not carrier_id:
             raise ApiError(422, "Выберите перевозчика.")
         filename, blob = await _maybe_file(form, "sts")
         moment = now_iso()
         with request.app.state.db.tx() as conn:
             saved = create_vehicle(conn, carrier_id, _vehicle_payload(form), moment)
-            if blob:
-                save_fleet_file(
-                    conn, request.app.state.db.data_dir, carrier_id, "sts", filename, blob, moment,
-                    vehicle_id=saved["id"],
-                )
+            _store_vehicle_scan(conn, request.app.state.db.data_dir, carrier_id, saved["id"], filename, blob, moment)
             target = _after(conn, form, "vehicle", saved["id"], carrier_id, moment)
     except ApiError as exc:
-        return _fail(exc, "/vehicles/new", "fields")
+        return _fail(exc, back, "fields")
     return _redirect(target)
 
 
@@ -214,13 +249,15 @@ def page_drivers(request: Request):
 
 @router.get("/drivers/new")
 def page_driver_new(request: Request):
-    carrier_id = request.query_params.get("carrier_id", "")
+    raw = request.query_params.get("carrier_id", "")
     with request.app.state.db.tx() as conn:
         carriers = list_carriers(conn, "", limit=100)
+    locked = _locked_carrier(carriers, raw)
     ctx = base_ctx(request, "carriers")
     ctx.update({
         "carriers": carriers,
-        "carrier_id": int(carrier_id) if str(carrier_id).isdigit() else None,
+        "carrier_id": locked["id"] if locked else None,
+        "locked_carrier": locked,
         "next": safe_next(request.query_params.get("next", "")),
     })
     return templates.TemplateResponse(request, "driver_new.html", ctx)
@@ -229,10 +266,13 @@ def page_driver_new(request: Request):
 @router.post("/drivers")
 async def page_driver_new_save(request: Request):
     form = await request.form()
+    back = "/drivers/new"
     try:
         check_csrf(request, form.get("csrf"))
         require_writer(request)
         carrier_id = _opt(form, "carrier_id")
+        if carrier_id:
+            back = f"/drivers/new?carrier_id={carrier_id}"
         if not carrier_id:
             raise ApiError(422, "Выберите перевозчика.")
         passport_name, passport = await _maybe_file(form, "passport")
@@ -240,19 +280,13 @@ async def page_driver_new_save(request: Request):
         moment = now_iso()
         with request.app.state.db.tx() as conn:
             saved = create_driver(conn, carrier_id, _driver_payload(form), moment)
-            if passport:
-                save_fleet_file(
-                    conn, request.app.state.db.data_dir, carrier_id, "passport", passport_name, passport, moment,
-                    driver_id=saved["id"],
-                )
-            if license_blob:
-                save_fleet_file(
-                    conn, request.app.state.db.data_dir, carrier_id, "license", license_name, license_blob, moment,
-                    driver_id=saved["id"],
-                )
+            _store_driver_scans(
+                conn, request.app.state.db.data_dir, carrier_id, saved["id"],
+                passport_name, passport, license_name, license_blob, moment,
+            )
             target = _after(conn, form, "driver", saved["id"], carrier_id, moment)
     except ApiError as exc:
-        return _fail(exc, "/drivers/new", "fields")
+        return _fail(exc, back, "fields")
     return _redirect(target)
 
 
@@ -358,20 +392,50 @@ async def page_expeditor_save(request: Request):
     return _redirect("/carriers/expeditor?note=saved")
 
 
-@router.get("/carriers/{carrier_id}")
-def page_carrier(request: Request, carrier_id: int):
-    tab = request.query_params.get("tab", "vehicles")
-    if tab not in {"vehicles", "drivers", "docs"}:
-        tab = "vehicles"
+def _load_carrier_page(request: Request, carrier_id: int):
     try:
         with request.app.state.db.tx() as conn:
-            carrier = carrier_detail(conn, carrier_id)
+            return carrier_detail(conn, carrier_id)
     except ApiError:
+        return None
+
+
+@router.get("/carriers/{carrier_id}")
+def page_carrier(request: Request, carrier_id: int):
+    carrier = _load_carrier_page(request, carrier_id)
+    if carrier is None:
+        ctx = base_ctx(request, "carriers")
+        return templates.TemplateResponse(request, "missing.html", ctx, status_code=404)
+    add = request.query_params.get("add", "")
+    if add not in {"driver", "vehicle"}:
+        add = ""
+    ctx = base_ctx(request, "carriers")
+    ctx.update({"carrier": carrier, "add": add})
+    return templates.TemplateResponse(request, "carrier.html", ctx)
+
+
+@router.get("/carriers/{carrier_id}/vehicles/{vehicle_id}")
+def page_vehicle_card(request: Request, carrier_id: int, vehicle_id: int):
+    carrier = _load_carrier_page(request, carrier_id)
+    vehicle = next((item for item in (carrier or {}).get("vehicles", []) if item["id"] == vehicle_id), None)
+    if carrier is None or vehicle is None:
         ctx = base_ctx(request, "carriers")
         return templates.TemplateResponse(request, "missing.html", ctx, status_code=404)
     ctx = base_ctx(request, "carriers")
-    ctx.update({"carrier": carrier, "tab": tab})
-    return templates.TemplateResponse(request, "carrier.html", ctx)
+    ctx.update({"carrier": carrier, "vehicle": vehicle})
+    return templates.TemplateResponse(request, "vehicle_card.html", ctx)
+
+
+@router.get("/carriers/{carrier_id}/drivers/{driver_id}")
+def page_driver_card(request: Request, carrier_id: int, driver_id: int):
+    carrier = _load_carrier_page(request, carrier_id)
+    driver = next((item for item in (carrier or {}).get("drivers", []) if item["id"] == driver_id), None)
+    if carrier is None or driver is None:
+        ctx = base_ctx(request, "carriers")
+        return templates.TemplateResponse(request, "missing.html", ctx, status_code=404)
+    ctx = base_ctx(request, "carriers")
+    ctx.update({"carrier": carrier, "driver": driver})
+    return templates.TemplateResponse(request, "driver_card.html", ctx)
 
 
 @router.post("/carriers/{carrier_id}")
@@ -404,21 +468,25 @@ async def page_carrier_delete(request: Request, carrier_id: int):
 @router.post("/carriers/{carrier_id}/vehicles")
 async def page_vehicle_create(request: Request, carrier_id: int):
     form = await request.form()
-    back = f"/carriers/{carrier_id}?tab=vehicles"
+    back = f"/carriers/{carrier_id}?add=vehicle"
     try:
         check_csrf(request, form.get("csrf"))
         require_writer(request)
+        _same_carrier(form, carrier_id)
+        filename, blob = await _maybe_file(form, "sts")
+        moment = now_iso()
         with request.app.state.db.tx() as conn:
-            create_vehicle(conn, carrier_id, _vehicle_payload(form), now_iso())
+            saved = create_vehicle(conn, carrier_id, _vehicle_payload(form), moment)
+            _store_vehicle_scan(conn, request.app.state.db.data_dir, carrier_id, saved["id"], filename, blob, moment)
     except ApiError as exc:
         return _fail(exc, back, "fields")
-    return _redirect(back + "&note=saved")
+    return _redirect(f"/carriers/{carrier_id}/vehicles/{saved['id']}?note=saved")
 
 
 @router.post("/carriers/{carrier_id}/vehicles/{vehicle_id}")
 async def page_vehicle_save(request: Request, carrier_id: int, vehicle_id: int):
     form = await request.form()
-    back = f"/carriers/{carrier_id}?tab=vehicles"
+    back = f"/carriers/{carrier_id}/vehicles/{vehicle_id}"
     try:
         check_csrf(request, form.get("csrf"))
         require_writer(request)
@@ -426,13 +494,13 @@ async def page_vehicle_save(request: Request, carrier_id: int, vehicle_id: int):
             update_vehicle(conn, carrier_id, vehicle_id, _vehicle_payload(form), now_iso())
     except ApiError as exc:
         return _fail(exc, back, "fields")
-    return _redirect(back + "&note=saved")
+    return _redirect(back + "?note=saved")
 
 
 @router.post("/carriers/{carrier_id}/vehicles/{vehicle_id}/delete")
 async def page_vehicle_delete(request: Request, carrier_id: int, vehicle_id: int):
     form = await request.form()
-    back = f"/carriers/{carrier_id}?tab=vehicles"
+    back = f"/carriers/{carrier_id}/vehicles/{vehicle_id}"
     try:
         check_csrf(request, form.get("csrf"))
         require_writer(request)
@@ -441,27 +509,35 @@ async def page_vehicle_delete(request: Request, carrier_id: int, vehicle_id: int
         unlink_stored(request.app.state.db.data_dir, names)
     except ApiError as exc:
         return _fail(exc, back, "fields")
-    return _redirect(back + "&note=saved")
+    return _redirect(f"/carriers/{carrier_id}?note=saved#vehicles")
 
 
 @router.post("/carriers/{carrier_id}/drivers")
 async def page_driver_create(request: Request, carrier_id: int):
     form = await request.form()
-    back = f"/carriers/{carrier_id}?tab=drivers"
+    back = f"/carriers/{carrier_id}?add=driver"
     try:
         check_csrf(request, form.get("csrf"))
         require_writer(request)
+        _same_carrier(form, carrier_id)
+        passport_name, passport = await _maybe_file(form, "passport")
+        license_name, license_blob = await _maybe_file(form, "license")
+        moment = now_iso()
         with request.app.state.db.tx() as conn:
-            create_driver(conn, carrier_id, _driver_payload(form), now_iso())
+            saved = create_driver(conn, carrier_id, _driver_payload(form), moment)
+            _store_driver_scans(
+                conn, request.app.state.db.data_dir, carrier_id, saved["id"],
+                passport_name, passport, license_name, license_blob, moment,
+            )
     except ApiError as exc:
         return _fail(exc, back, "fields")
-    return _redirect(back + "&note=saved")
+    return _redirect(f"/carriers/{carrier_id}/drivers/{saved['id']}?note=saved")
 
 
 @router.post("/carriers/{carrier_id}/drivers/{driver_id}")
 async def page_driver_save(request: Request, carrier_id: int, driver_id: int):
     form = await request.form()
-    back = f"/carriers/{carrier_id}?tab=drivers"
+    back = f"/carriers/{carrier_id}/drivers/{driver_id}"
     try:
         check_csrf(request, form.get("csrf"))
         require_writer(request)
@@ -469,13 +545,13 @@ async def page_driver_save(request: Request, carrier_id: int, driver_id: int):
             update_driver(conn, carrier_id, driver_id, _driver_payload(form), now_iso())
     except ApiError as exc:
         return _fail(exc, back, "fields")
-    return _redirect(back + "&note=saved")
+    return _redirect(back + "?note=saved")
 
 
 @router.post("/carriers/{carrier_id}/drivers/{driver_id}/delete")
 async def page_driver_delete(request: Request, carrier_id: int, driver_id: int):
     form = await request.form()
-    back = f"/carriers/{carrier_id}?tab=drivers"
+    back = f"/carriers/{carrier_id}/drivers/{driver_id}"
     try:
         check_csrf(request, form.get("csrf"))
         require_writer(request)
@@ -484,19 +560,24 @@ async def page_driver_delete(request: Request, carrier_id: int, driver_id: int):
         unlink_stored(request.app.state.db.data_dir, names)
     except ApiError as exc:
         return _fail(exc, back, "fields")
-    return _redirect(back + "&note=saved")
+    return _redirect(f"/carriers/{carrier_id}?note=saved#drivers")
 
 
 @router.post("/carriers/{carrier_id}/files")
 async def page_fleet_upload(request: Request, carrier_id: int):
     form = await request.form()
     kind = _form_last(form, "kind") or "doc"
-    tab = "docs" if kind == "doc" else ("vehicles" if kind == "sts" else "drivers")
-    back = f"/carriers/{carrier_id}?tab={tab}"
+    back = f"/carriers/{carrier_id}"
     upload = form.get("file")
     try:
         check_csrf(request, form.get("csrf"))
         require_writer(request)
+        vehicle_id = _opt(form, "vehicle_id")
+        driver_id = _opt(form, "driver_id")
+        if kind == "sts" and vehicle_id:
+            back = f"/carriers/{carrier_id}/vehicles/{vehicle_id}"
+        elif kind in {"passport", "license"} and driver_id:
+            back = f"/carriers/{carrier_id}/drivers/{driver_id}"
         blob = await _read_upload(upload)
         with request.app.state.db.tx() as conn:
             save_fleet_file(
@@ -507,12 +588,13 @@ async def page_fleet_upload(request: Request, carrier_id: int):
                 getattr(upload, "filename", "") or "",
                 blob,
                 now_iso(),
-                vehicle_id=_opt(form, "vehicle_id"),
-                driver_id=_opt(form, "driver_id"),
+                vehicle_id=vehicle_id,
+                driver_id=driver_id,
             )
     except ApiError as exc:
         return _fail(exc, back, "scan")
-    return _redirect(back + "&note=saved")
+    anchor = "" if "/vehicles/" in back or "/drivers/" in back else "#docs"
+    return _redirect(back + "?note=saved" + anchor)
 
 
 @router.get("/carriers/{carrier_id}/kartochka.pdf")

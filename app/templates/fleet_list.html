@@ -32,12 +32,12 @@
         {% for row in rows %}
         <tr>
           {% if title == 'Машины' %}
-          <td data-label="Госномер"><a class="num" href="/carriers/{{ row.carrier_id }}?tab=vehicles">{{ row.plate }}</a></td>
+          <td data-label="Госномер"><a class="num" href="/carriers/{{ row.carrier_id }}/vehicles/{{ row.id }}">{{ row.plate }}</a></td>
           <td data-label="Марка">{{ row.make_model }}</td>
           <td data-label="Перевозчик">{{ row.carrier_name }}</td>
           <td data-label="СТС">{% if row.sts_file %}есть{% else %}нет{% endif %}</td>
           {% else %}
-          <td data-label="ФИО"><a class="num" href="/carriers/{{ row.carrier_id }}?tab=drivers">{{ row.name }}</a></td>
+          <td data-label="ФИО"><a class="num" href="/carriers/{{ row.carrier_id }}/drivers/{{ row.id }}">{{ row.name }}</a></td>
           <td data-label="Телефон">{{ row.phone }}</td>
           <td data-label="Перевозчик">{{ row.carrier_name }}</td>
           <td data-label="Сканы">{% if row.passport_file %}паспорт{% else %}нет паспорта{% endif %}, {% if row.license_file %}ВУ{% else %}нет ВУ{% endif %}</td>
