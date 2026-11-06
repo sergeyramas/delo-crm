@@ -152,7 +152,7 @@ curl -sS -H "Content-Type: application/json" \
 
 ## Куда класть данные
 
-Код: `/opt/delo-crm`.
+Код и окружение: `/srv/delo-crm` (приложение и `.venv`). `/opt` не используется.
 
 | | Путь |
 |---|---|
@@ -181,12 +181,12 @@ NOTIFY_TG=0
 
 ```sh
 sudo useradd --system --create-home --home-dir /var/lib/delo --shell /usr/sbin/nologin delo || true
-sudo mkdir -p /opt/delo-crm /srv/delo-crm/files /root/ati/secrets /srv/ati/secrets
+sudo mkdir -p /srv/delo-crm/files /root/ati/secrets /srv/ati/secrets
 sudo chown -R delo:delo /srv/delo-crm
-# код в /opt/delo-crm, затем:
-sudo python3 -m venv /opt/delo-crm/.venv
-sudo /opt/delo-crm/.venv/bin/pip install -r /opt/delo-crm/requirements.txt
-sudo chown -R delo:delo /opt/delo-crm
+# код в /srv/delo-crm, затем:
+sudo python3 -m venv /srv/delo-crm/.venv
+sudo /srv/delo-crm/.venv/bin/pip install -r /srv/delo-crm/requirements.txt
+sudo chown -R delo:delo /srv/delo-crm
 sudo install -m 600 /dev/null /root/ati/secrets/delo-crm.env
 sudo install -m 600 /dev/null /root/ati/secrets/delo-crm-auth.env
 # заполнить оба файла на сервере, не из репозитория
