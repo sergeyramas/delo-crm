@@ -1,0 +1,32 @@
+<article class="msg {{ m.css }}">
+  <div class="meta">
+    <span class="ms">
+      <span class="badge {{ m.channel }}">{{ m.channel_label }}</span>
+      <span class="badge {{ m.direction }}">{{ m.direction_label }}</span>
+      <span class="badge {{ m.status }}">{{ m.status_label }}</span>
+      {% if m.unbound %}<span class="badge missing">не привязано</span>{% endif %}
+    </span>
+    <time class="mut" datetime="{{ m.sent_at or m.received_at or m.created_at }}">{{ m.when }}</time>
+  </div>
+  {% if m.subject %}<h3>{{ m.subject }}</h3>{% endif %}
+  <p>{{ m.body_text }}</p>
+  <div class="src">
+    {% if m.author_user %}{{ m.author_user }}{% endif %}
+    {% if m.party_name and m.party_name != m.author_user %} · {{ m.party_name }}{% endif %}
+    {% if m.package_id %}
+      · <a class="deal-link" href="/packages/{{ m.package_id }}">Открыть сделку {{ m.package_number }}{% if m.route_label %} · {{ m.route_label }}{% endif %}</a>
+    {% endif %}
+  </div>
+  {% if show_bind and m.unbound %}
+  <form class="bind" method="post" action="/messages/{{ m.id }}/bind">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="back" value="{{ back }}">
+    <div class="field">
+      <label for="bind-package-{{ m.id }}">Номер заявки</label>
+      <input id="bind-package-{{ m.id }}" name="package" type="text" maxlength="40" required autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="done" aria-describedby="bind-hint-{{ m.id }}">
+    </div>
+    <button class="btn small" type="submit">Привязать</button>
+    <span class="mut" id="bind-hint-{{ m.id }}">Например, Д-2026-0001. Сообщение останется в CRM, наружу не уйдёт.</span>
+  </form>
+  {% endif %}
+</article>

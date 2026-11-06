@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}ATI Delivery · CRM — переписка {{ p.number }}{% endblock %}
+{% block body %}
+{% include "_deal_tabs.html" %}
+<div class="card split">
+  <div>
+    <div class="mut"><a href="/packages/{{ p.id }}">← Карточка сделки</a></div>
+    <h1>Переписка · {{ p.number }} · {{ p.route_label }}</h1>
+    <p class="mut">Хронология этой заявки, сверху старые. Отправки наружу нет.</p>
+  </div>
+  <span class="chip {{ p.stage_class }}">{{ p.stage_label }}</span>
+</div>
+<div class="card">
+  {% if truncated %}<p class="mut">Показаны последние {{ cap }} сообщений.</p>{% endif %}
+  {% if messages %}
+    {% for m in messages %}
+      {% with show_bind=False %}
+      {% include "_message.html" %}
+      {% endwith %}
+    {% endfor %}
+  {% else %}
+    <p class="mut">По этой заявке переписки пока нет. Непривязанные письма лежат в разделе «Переписка».</p>
+  {% endif %}
+  <p class="src"><a href="/messages?package={{ p.number }}">Эта заявка в общей ленте</a></p>
+</div>
+<div class="card">
+  <form class="reply" method="post" action="/packages/{{ p.id }}/messages">
+    <fieldset disabled>
+      <legend>Ответ</legend>
+      <div class="field">
+        <label for="reply-text">Текст ответа</label>
+        <textarea id="reply-text" name="text" maxlength="8000" aria-describedby="reply-note"></textarea>
+      </div>
+      <p><button class="btn" type="submit" disabled>Отправить</button></p>
+    </fieldset>
+    <p class="mut" id="reply-note">v1(A): форма заложена и выключена. Почта, Telegram и MAX наружу не вызываются.</p>
+  </form>
+</div>
+{% endblock %}

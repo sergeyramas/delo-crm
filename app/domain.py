@@ -85,6 +85,7 @@ LIST_PAGE_SIZE = 50
 LIST_PAGE_MAX = 100
 KANBAN_CAP = 80
 FEED_CAP = 200
+MESSAGE_CAP = 200
 TASK_CAP = 200
 PARTY_DEAL_CAP = 50
 
@@ -106,6 +107,27 @@ FEED_FILTERS = [
     {"code": "driver", "label": "Водитель", "class": "f-driver"},
     {"code": "file", "label": "Файлы", "class": "f-file"},
 ]
+
+# Переписка v1(A): каналы хуков. Живая отправка сюда не входит.
+MESSAGE_CHANNELS = [
+    {"code": "email", "label": "Почта", "class": "f-mail", "css": "st-docs_sent"},
+    {"code": "tg", "label": "Telegram", "class": "f-tg", "css": "st-zayavka"},
+    {"code": "max", "label": "MAX", "class": "f-max", "css": "st-v_puti"},
+]
+
+MESSAGE_DIRECTIONS = [
+    {"code": "in", "label": "Входящие", "item": "входящее", "class": "f-in"},
+    {"code": "out", "label": "Исходящие", "item": "исходящее", "class": "f-out"},
+]
+
+MESSAGE_STATUSES = {
+    "queued": "в очереди",
+    "sent": "отправлено",
+    "delivered": "доставлено",
+    "failed": "ошибка",
+    "received": "получено",
+    "read": "прочитано",
+}
 
 
 def now_iso() -> str:

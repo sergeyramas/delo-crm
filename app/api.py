@@ -157,6 +157,88 @@ async def package_event(request: Request, key: str):
     )
 
 
+def _json_object(raw: bytes) -> dict:
+    if len(raw) > MAX_BODY:
+        raise ApiError(413, "Слишком большой запрос.")
+    if not raw:
+        return {}
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ApiError(422, "Не JSON.") from exc
+    if not isinstance(payload, dict):
+        raise ApiError(422, "Нужен объект JSON.")
+    return payload
+
+
+_HOOK_BODY = 256 * 1024
+
+
+@router.post("/s/hooks/{channel}")
+async def hook_message(request: Request, channel: str):
+    from app.messages import accept_inbound
+
+    raw = await request.body()
+    if len(raw) > _HOOK_BODY:
+        raise ApiError(413, "Слишком большой запрос.")
+    payload = _json_object(raw)
+    require_secret(request, payload)
+    return accept_inbound(request.app.state.db, channel, payload)
+
+
+@router.get("/s/messages")
+def messages_list(
+    request: Request,
+    channel: str | None = None,
+    direction: str | None = None,
+    package: str | None = None,
+    unbound: int = 0,
+    limit: int = 50,
+    offset: int = 0,
+):
+    from app.messages import list_messages
+
+    require_secret(request)
+    if unbound not in (0, 1):
+        raise ApiError(422, "unbound — 0 или 1.")
+    return list_messages(
+        request.app.state.db,
+        channel=channel or "",
+        direction=direction or "",
+        package=package or "",
+        unbound=bool(unbound),
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/s/messages/{message_id}")
+def message_one(request: Request, message_id: int):
+    from app.messages import get_message
+
+    require_secret(request)
+    return get_message(request.app.state.db, message_id)
+
+
+@router.post("/s/messages/{message_id}/bind")
+async def message_bind(request: Request, message_id: int):
+    from app.messages import bind_message
+
+    payload = _json_object(await request.body())
+    require_secret(request, payload)
+    package = payload.get("package")
+    if package in (None, ""):
+        package = payload.get("number")
+    if package in (None, ""):
+        package = payload.get("package_id")
+    if isinstance(package, bool) or not isinstance(package, (str, int)):
+        package = ""
+    actor = payload.get("actor") or ""
+    if not isinstance(actor, str):
+        actor = ""
+    return bind_message(request.app.state.db, message_id, str(package), actor)
+
+
 @router.get("/api/packages/{key}/client-attachments")
 def client_attachments_list(request: Request, key: str):
     from app.scans import client_attachments

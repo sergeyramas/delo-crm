@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}ATI Delivery · CRM — переписка{% endblock %}
+{% block body %}
+<div class="card split">
+  <div>
+    <h1>Переписка</h1>
+    <p class="mut">Общая лента по всем заявкам, сверху новые. Клик по номеру открывает сделку. Почта, Telegram и MAX наружу отсюда не уходят.</p>
+  </div>
+  <span class="mut">{{ total }}</span>
+</div>
+{% for line in filter_notes %}
+<div class="banner" role="status">{{ line }}</div>
+{% endfor %}
+<div class="card">
+  <h2>Канал</h2>
+  <div class="filters" aria-label="Канал">
+    {% for item in channel_filters %}
+    <a class="f {{ item.class }} {% if item.on %}is-on{% endif %}" href="{{ item.href }}" {% if item.on %}aria-current="true"{% endif %}>{{ item.label }} · {{ item.count }}</a>
+    {% endfor %}
+  </div>
+  <h2 class="gap">Направление</h2>
+  <div class="filters" aria-label="Направление">
+    {% for item in direction_filters %}
+    <a class="f {{ item.class }} {% if item.on %}is-on{% endif %}" href="{{ item.href }}" {% if item.on %}aria-current="true"{% endif %}>{{ item.label }} · {{ item.count }}</a>
+    {% endfor %}
+    <a class="f f-loose {% if unbound %}is-on{% endif %}" href="{{ loose_href }}" {% if unbound %}aria-current="true"{% endif %}>не привязано · {{ loose_count }}</a>
+  </div>
+  <form class="status-form" method="get" action="/messages">
+    <fieldset class="field">
+      <legend class="vh">Заявка</legend>
+      {% if channel %}<input type="hidden" name="channel" value="{{ channel }}">{% endif %}
+      {% if direction %}<input type="hidden" name="direction" value="{{ direction }}">{% endif %}
+      <label for="filter-package">Заявка</label>
+      <input id="filter-package" name="package" type="text" value="{{ package_query }}" maxlength="40" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" aria-describedby="package-hint">
+    </fieldset>
+    <button class="btn" type="submit">Показать</button>
+  </form>
+  <p class="mut" id="package-hint">Номер сделки, например Д-2026-0001. Пустое поле — все заявки. Ответ из общей ленты не отправляется: форма ответа на вкладке сделки, и она выключена.</p>
+</div>
+<div class="card">
+  {% if truncated %}<p class="mut">Показаны последние {{ cap }} сообщений.</p>{% endif %}
+  {% if messages %}
+    {% for m in messages %}
+      {% with show_bind=True %}
+      {% include "_message.html" %}
+      {% endwith %}
+    {% endfor %}
+  {% elif unknown_package %}
+    <p class="mut">Сообщений нет: заявка не найдена.</p>
+  {% else %}
+    <p class="mut">В этом фильтре пусто. Новое сообщение записывает хук <code>POST /s/hooks/email</code>, <code>/tg</code> или <code>/max</code>. Наружу CRM ничего не отправляет.</p>
+  {% endif %}
+</div>
+{% endblock %}
