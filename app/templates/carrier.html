@@ -54,6 +54,7 @@
 {% if tab == 'vehicles' %}
 <div class="card">
   <h2>Транспорт</h2>
+  {% if can_write %}<p><a class="btn" href="/vehicles/new?carrier_id={{ carrier.id }}&amp;next=/carriers/{{ carrier.id }}">+ Добавить машину</a></p>{% endif %}
   {% for vehicle in carrier.vehicles %}
   <details class="fleet" {% if loop.first %}open{% endif %}>
     <summary>{{ vehicle.plate }} · {{ vehicle.make_model }}</summary>
@@ -88,20 +89,13 @@
     {% endif %}
   </details>
   {% else %}
-  <p class="mut">ТС пока нет.</p>
+  <p class="mut">ТС пока нет. Кнопка «+ Добавить машину» открывает форму с полями и сканом СТС.</p>
   {% endfor %}
-  {% if can_write %}
-  <h2>Новое ТС</h2>
-  <form method="post" action="/carriers/{{ carrier.id }}/vehicles">
-    <input type="hidden" name="csrf" value="{{ csrf }}">
-    {% with prefix='new', item=none %}{% include "vehicle_fields.html" %}{% endwith %}
-    <p><button class="btn" type="submit">Добавить ТС</button></p>
-  </form>
-  {% endif %}
 </div>
 {% elif tab == 'drivers' %}
 <div class="card">
   <h2>Водители</h2>
+  {% if can_write %}<p><a class="btn" href="/drivers/new?carrier_id={{ carrier.id }}&amp;next=/carriers/{{ carrier.id }}">+ Добавить водителя</a></p>{% endif %}
   {% for driver in carrier.drivers %}
   <details class="fleet" {% if loop.first %}open{% endif %}>
     <summary>{{ driver.name }}{% if driver.user_is_carrier %} · он же перевозчик{% endif %}</summary>
@@ -136,16 +130,8 @@
     {% endif %}
   </details>
   {% else %}
-  <p class="mut">Водителей пока нет.</p>
+  <p class="mut">Водителей пока нет. Кнопка «+ Добавить водителя» открывает форму с полями, сканом паспорта и сканом ВУ.</p>
   {% endfor %}
-  {% if can_write %}
-  <h2>Новый водитель</h2>
-  <form method="post" action="/carriers/{{ carrier.id }}/drivers">
-    <input type="hidden" name="csrf" value="{{ csrf }}">
-    {% with prefix='new', item=none %}{% include "driver_fields.html" %}{% endwith %}
-    <p><button class="btn" type="submit">Добавить водителя</button></p>
-  </form>
-  {% endif %}
 </div>
 {% else %}
 <div class="card">

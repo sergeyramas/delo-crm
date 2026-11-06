@@ -7,7 +7,10 @@
     <p class="mut">Реестр для карточки PDF: перевозчик, его ТС и водители. Карточки контрагентов из заявки здесь не дублируются.</p>
   </div>
   <div class="haul">
-    {% if can_write %}<a class="btn" href="/carriers/new">Новый перевозчик</a>{% endif %}
+    {% if can_write %}<a class="btn" href="/carriers/new">+ Добавить перевозчика</a>{% endif %}
+    <a class="btn ghost" href="/vehicles">Машины</a>
+    <a class="btn ghost" href="/drivers">Водители</a>
+    <a class="btn ghost" href="/clients">Заказчики</a>
     <a class="btn ghost" href="/carriers/expeditor">Экспедитор</a>
   </div>
 </div>

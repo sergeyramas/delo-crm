@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}ATI Delivery · CRM — заказчики{% endblock %}
+{% block body %}
+<div class="card split">
+  <div>
+    <div class="mut"><a href="/carriers">← Перевозчики</a></div>
+    <h1>Заказчики</h1>
+  </div>
+  {% if can_write %}<a class="btn" href="/clients/new">+ Добавить заказчика</a>{% endif %}
+</div>
+<div class="card">
+  <form class="status-form" method="get" action="/clients">
+    <div class="field">
+      <label for="q">Поиск по названию, ИНН или телефону</label>
+      <input id="q" name="q" type="text" value="{{ q }}" maxlength="80">
+    </div>
+    <button class="btn" type="submit">Найти</button>
+  </form>
+  {% if not rows %}<p class="mut">Пока пусто.</p>{% endif %}
+  <div class="table-wrap" tabindex="0">
+    <table>
+      <thead><tr><th>Наименование</th><th>ИНН</th><th>Телефон</th><th>Почта</th></tr></thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td data-label="Наименование"><a class="num" href="/parties/{{ row.id }}">{{ row.name }}</a></td>
+          <td data-label="ИНН">{{ row.inn or "—" }}</td>
+          <td data-label="Телефон">{{ row.phone or "—" }}</td>
+          <td data-label="Почта">{{ row.email or "—" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

@@ -237,6 +237,74 @@ def test_negotiations_stay_and_tracker_hooks(client):
     assert "получено" in fresh.text
 
 
+def test_add_forms_and_scans_follow_the_package(client):
+    ids = _doronin(client)
+    package = _package(client)
+    menu = client.get("/carriers")
+    for label in ("+ Добавить перевозчика", "+ Добавить машину", "+ Добавить водителя", "+ Добавить заказчика"):
+        assert label in menu.text
+    driver_form = client.get(f"/drivers/new?carrier_id={ids['carrier_id']}")
+    assert "Добавить водителя" in driver_form.text
+    assert 'name="passport"' in driver_form.text
+    assert 'name="license"' in driver_form.text
+    assert "Скан паспорта" in driver_form.text
+    carrier_form = client.get("/carriers/new")
+    assert 'name="doc"' in carrier_form.text
+    vehicle_form = client.get("/vehicles/new")
+    assert 'name="sts"' in vehicle_form.text
+    client_form = client.get("/clients/new")
+    assert "Добавить заказчика" in client_form.text
+    assert 'name="doc"' in client_form.text
+    deal = client.get(f"/packages/{package['id']}")
+    assert deal.text.count("+ новый") >= 4
+    assigned = client.post(
+        f"/s/packages/{package['id']}/assign",
+        headers=HEADERS,
+        json={"carrier_id": ids["carrier_id"], "vehicle_id": ids["vehicle_id"], "driver_id": ids["driver_id"]},
+    )
+    assert assigned.status_code == 200, assigned.text
+    page = client.get(f"/packages/{package['id']}")
+    assert "Из карточек" in page.text
+    assert "sts.pdf" in page.text
+    assert ">СТС<" in page.text or "СТС" in page.text
+    assert "Паспорт" in page.text
+    token = re.search(r'name="csrf" value="([^"]+)"', driver_form.text).group(1)
+    created = client.post(
+        "/drivers",
+        data={
+            "csrf": token,
+            "next": f"/packages/{package['id']}",
+            "carrier_id": str(ids["carrier_id"]),
+            "name": "Новый Водитель",
+            "birth_date": "1990-01-02",
+            "phone": "+7 903 111-22-33",
+            "passport_series": "45 01",
+            "passport_number": "111222",
+            "passport_issued_by": "ОВД",
+            "passport_issued_at": "2010-05-05",
+            "passport_dept_code": "770-001",
+            "license_series": "77 11",
+            "license_number": "333444",
+            "license_issued_at": "2020-01-01",
+            "license_issued_by": "ГИБДД",
+            "license_valid_until": "2030-01-01",
+            "license_categories": "B, C",
+            "consent": "1",
+        },
+        files={
+            "passport": ("passport.pdf", PDF, "application/pdf"),
+            "license": ("license.pdf", PDF, "application/pdf"),
+        },
+        follow_redirects=False,
+    )
+    assert created.status_code == 303, created.text
+    assert f"/packages/{package['id']}" in created.headers["location"]
+    fresh = client.get(f"/packages/{package['id']}")
+    assert "Новый Водитель" in fresh.text
+    assert "passport.pdf" in fresh.text
+    assert "license.pdf" in fresh.text
+
+
 def test_roles_dispatcher_writes_operator_does_not(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setenv("SQLITE_PATH", str(tmp_path / "delo.db"))

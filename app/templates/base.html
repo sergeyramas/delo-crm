@@ -10,6 +10,7 @@
 <body>
 <a class="skip" href="#main">К содержимому</a>
 <header class="top">
+  <div class="top-row">
   <div><b>ATI Delivery · CRM</b></div>
   <nav class="nav" aria-label="Разделы">
     <a href="/" {% if active == 'list' %}class="on" aria-current="page"{% endif %}>Список</a>
@@ -24,6 +25,15 @@
     {% endif %}
   </nav>
   <span class="who">{{ who }}</span>
+  </div>
+  {% if can_write %}
+  <nav class="addbar" aria-label="Добавить">
+    <a class="btn small" href="/carriers/new">+ Добавить перевозчика</a>
+    <a class="btn small" href="/vehicles/new">+ Добавить машину</a>
+    <a class="btn small" href="/drivers/new">+ Добавить водителя</a>
+    <a class="btn small" href="/clients/new">+ Добавить заказчика</a>
+  </nav>
+  {% endif %}
 </header>
 <main id="main" class="wrap">
   {% if err %}<div class="banner" role="alert">{{ err }}</div>{% endif %}

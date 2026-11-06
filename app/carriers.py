@@ -982,10 +982,210 @@ def add_negotiation(conn, package_id: int, text: str, author: str, moment: str) 
     return {"id": row["id"], "author": row["author"], "text": row["body"], "created_at": row["created_at"]}
 
 
-def haul_view(db, package: dict, query: str) -> dict:
+def list_vehicles(conn, query: str = "", limit: int = 50) -> list[dict]:
+    limit = 50 if not 1 <= int(limit) <= 100 else int(limit)
+    text = clean(query, 80)
+    if text:
+        rows = conn.execute(
+            """SELECT v.*, c.name AS carrier_name
+               FROM vehicles v JOIN carriers c ON c.id = v.carrier_id
+               WHERE v.plate LIKE ? OR v.vin LIKE ? OR v.make_model LIKE ? OR c.name LIKE ? COLLATE NOCASE
+               ORDER BY v.updated_at DESC, v.id DESC LIMIT ?""",
+            (f"%{text}%", f"%{text}%", f"%{text}%", f"%{text}%", limit),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """SELECT v.*, c.name AS carrier_name
+               FROM vehicles v JOIN carriers c ON c.id = v.carrier_id
+               ORDER BY v.updated_at DESC, v.id DESC LIMIT ?""",
+            (limit,),
+        ).fetchall()
+    out = []
+    for row in rows:
+        item = dict(row)
+        files = _files_for(conn, "vehicle", item["id"])
+        public = public_vehicle(item, _one_file(files, "sts"))
+        public["carrier_name"] = item["carrier_name"]
+        out.append(public)
+    return out
+
+
+def list_drivers(conn, query: str = "", limit: int = 50) -> list[dict]:
+    limit = 50 if not 1 <= int(limit) <= 100 else int(limit)
+    text = clean(query, 80)
+    if text:
+        rows = conn.execute(
+            """SELECT d.*, c.name AS carrier_name
+               FROM drivers d JOIN carriers c ON c.id = d.carrier_id
+               WHERE d.name LIKE ? COLLATE NOCASE OR d.phone LIKE ? OR c.name LIKE ? COLLATE NOCASE
+               ORDER BY d.updated_at DESC, d.id DESC LIMIT ?""",
+            (f"%{text}%", f"%{text}%", f"%{text}%", limit),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """SELECT d.*, c.name AS carrier_name
+               FROM drivers d JOIN carriers c ON c.id = d.carrier_id
+               ORDER BY d.updated_at DESC, d.id DESC LIMIT ?""",
+            (limit,),
+        ).fetchall()
+    out = []
+    for row in rows:
+        item = dict(row)
+        files = _files_for(conn, "driver", item["id"])
+        public = public_driver(item, _one_file(files, "passport"), _one_file(files, "license"))
+        public["carrier_name"] = item["carrier_name"]
+        out.append(public)
+    return out
+
+
+def list_clients(conn, query: str = "", limit: int = 50) -> list[dict]:
+    limit = 50 if not 1 <= int(limit) <= 100 else int(limit)
+    text = clean(query, 80)
+    digits = _digits(text)
+    if text:
+        rows = conn.execute(
+            """SELECT * FROM parties WHERE kind = 'client' AND (
+                 name LIKE ? COLLATE NOCASE OR inn LIKE ? OR phone LIKE ?
+                 OR (? != '' AND REPLACE(REPLACE(REPLACE(phone, ' ', ''), '-', ''), '+', '') LIKE ?)
+               )
+               ORDER BY updated_at DESC, id DESC LIMIT ?""",
+            (f"%{text}%", f"%{text}%", f"%{text}%", digits, f"%{digits}%", limit),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM parties WHERE kind = 'client' ORDER BY updated_at DESC, id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    return [
+        {
+            "id": row["id"],
+            "name": row["name"],
+            "contact_name": row["contact_name"],
+            "company": row["company"],
+            "phone": row["phone"],
+            "email": row["email"],
+            "inn": row["inn"],
+            "note": row["note"],
+        }
+        for row in rows
+    ]
+
+
+def save_client_file(conn, data_dir: Path, party_id: int, filename: str, blob: bytes, moment: str) -> dict:
+    row = conn.execute(
+        "SELECT id FROM parties WHERE id = ? AND kind = 'client'",
+        (party_id,),
+    ).fetchone()
+    if row is None:
+        raise ApiError(404, "Заказчик не найден.")
+    ext, content_type = sniff(filename, blob)
+    original = display_name(filename, ext)
+    stored = f"fleet/client/{party_id}/doc_{uuid.uuid4().hex}.{ext}"
+    path = data_dir / "files" / stored
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(blob)
+    try:
+        conn.execute(
+            """INSERT INTO fleet_files (
+                owner_kind, owner_id, file_kind, stored_name, original_name, content_type, size, created_at
+            ) VALUES ('client', ?, 'doc', ?, ?, ?, ?, ?)""",
+            (party_id, stored, original, content_type, len(blob), moment),
+        )
+    except Exception:
+        path.unlink(missing_ok=True)
+        raise
+    saved = conn.execute("SELECT * FROM fleet_files WHERE stored_name = ?", (stored,)).fetchone()
+    return _public_file(dict(saved))
+
+
+_LINK_LABEL = {"sts": "СТС", "passport": "Паспорт", "license": "ВУ", "doc": "Документ"}
+
+
+def package_linked_files(conn, package: dict) -> list[dict]:
+    """Сканы выбранных карточек. В сделку копировать не нужно: пакет показывает их сам."""
+    items = []
+
+    def add(rows: list[dict], who: str) -> None:
+        for row in rows:
+            items.append({
+                "id": row["id"],
+                "label": _LINK_LABEL.get(row["file_kind"], "Файл"),
+                "who": who,
+                "original_name": row["original_name"],
+            })
+
+    carrier_id = package.get("carrier_id")
+    if carrier_id:
+        carrier = conn.execute("SELECT name FROM carriers WHERE id = ?", (carrier_id,)).fetchone()
+        who = carrier["name"] if carrier else "Перевозчик"
+        add([row for row in _files_for(conn, "carrier", int(carrier_id)) if row["file_kind"] == "doc"], who)
+    vehicle_id = package.get("vehicle_id")
+    if vehicle_id:
+        vehicle = conn.execute("SELECT plate FROM vehicles WHERE id = ?", (vehicle_id,)).fetchone()
+        who = f"ТС {vehicle['plate']}" if vehicle else "ТС"
+        add([row for row in _files_for(conn, "vehicle", int(vehicle_id)) if row["file_kind"] == "sts"], who)
+    driver_id = package.get("driver_id")
+    if driver_id:
+        driver = conn.execute("SELECT name FROM drivers WHERE id = ?", (driver_id,)).fetchone()
+        who = driver["name"] if driver else "Водитель"
+        add(
+            [row for row in _files_for(conn, "driver", int(driver_id)) if row["file_kind"] in {"passport", "license"}],
+            who,
+        )
+    client_id = package.get("client_id")
+    if client_id:
+        client = conn.execute(
+            "SELECT name FROM parties WHERE id = ? AND kind = 'client'",
+            (client_id,),
+        ).fetchone()
+        if client:
+            add([row for row in _files_for(conn, "client", int(client_id)) if row["file_kind"] == "doc"], client["name"])
+    return items
+
+
+def attach_newcomer(conn, package: dict, kind: str, new_id: int, moment: str) -> None:
+    """После «+ новый» сразу выбрать созданную карточку в этой сделке."""
+    if kind == "client":
+        conn.execute(
+            "UPDATE packages SET client_id = ?, updated_at = ? WHERE id = ?",
+            (new_id, moment, package["id"]),
+        )
+        return
+    if kind == "carrier":
+        assign_package(conn, package, new_id, None, None, moment)
+        return
+    if kind == "vehicle":
+        vehicle = conn.execute("SELECT carrier_id FROM vehicles WHERE id = ?", (new_id,)).fetchone()
+        if vehicle is None:
+            raise ApiError(404, "ТС не найдено.")
+        carrier_id = int(vehicle["carrier_id"])
+        driver_id = package.get("driver_id")
+        if driver_id:
+            driver = conn.execute("SELECT carrier_id FROM drivers WHERE id = ?", (driver_id,)).fetchone()
+            if driver is None or int(driver["carrier_id"]) != carrier_id:
+                driver_id = None
+        assign_package(conn, package, carrier_id, new_id, driver_id, moment)
+        return
+    if kind == "driver":
+        driver = conn.execute("SELECT carrier_id FROM drivers WHERE id = ?", (new_id,)).fetchone()
+        if driver is None:
+            raise ApiError(404, "Водитель не найден.")
+        carrier_id = int(driver["carrier_id"])
+        vehicle_id = package.get("vehicle_id")
+        if vehicle_id:
+            vehicle = conn.execute("SELECT carrier_id FROM vehicles WHERE id = ?", (vehicle_id,)).fetchone()
+            if vehicle is None or int(vehicle["carrier_id"]) != carrier_id:
+                vehicle_id = None
+        assign_package(conn, package, carrier_id, vehicle_id, new_id, moment)
+        return
+    raise ApiError(422, "Некого привязать к сделке.")
+
+
+def haul_view(db, package: dict, query: str, client_query: str = "") -> dict:
     with db.tx() as conn:
         expeditor = load_expeditor(conn)
         carriers = list_carriers(conn, query, limit=8 if not clean(query, 80) else 20)
+        clients = list_clients(conn, client_query, limit=8 if not clean(client_query, 80) else 20)
         selected = None
         vehicle = None
         driver = None
@@ -1002,6 +1202,23 @@ def haul_view(db, package: dict, query: str) -> dict:
                 brief["vehicle_count"] = len(selected["vehicles"])
                 brief["driver_count"] = len(selected["drivers"])
                 carriers = [brief, *carriers]
+        client_id = package.get("client_id")
+        if client_id and client_id not in {item["id"] for item in clients}:
+            current = conn.execute(
+                "SELECT * FROM parties WHERE id = ? AND kind = 'client'",
+                (client_id,),
+            ).fetchone()
+            if current:
+                clients = [{
+                    "id": current["id"],
+                    "name": current["name"],
+                    "contact_name": current["contact_name"],
+                    "company": current["company"],
+                    "phone": current["phone"],
+                    "email": current["email"],
+                    "inn": current["inn"],
+                    "note": current["note"],
+                }, *clients]
         state = readiness(expeditor, selected, vehicle, driver)
         stored = conn.execute(
             "SELECT id FROM files WHERE package_id = ? AND stored_name = ?",
@@ -1014,6 +1231,11 @@ def haul_view(db, package: dict, query: str) -> dict:
         ) or selected["name"].strip().casefold() == driver["name"].strip().casefold()
     return {
         "q": query or "",
+        "client_q": client_query or "",
+        "clients": [
+            {**item, "selected": item["id"] == package.get("client_id")}
+            for item in clients
+        ],
         "carriers": [
             {**item, "selected": bool(selected and item["id"] == selected["id"])}
             for item in carriers

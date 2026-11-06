@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}ATI Delivery · CRM — добавить водителя{% endblock %}
+{% block body %}
+<div class="card">
+  <div class="mut"><a href="/drivers">← Водители</a></div>
+  <h1>Добавить водителя</h1>
+  <p class="mut">ФИО, паспорт, права и оба скана — на этой же форме.</p>
+  {% if not carriers %}
+  <p class="gate">Сначала нужен перевозчик. <a href="/carriers/new">+ Добавить перевозчика</a></p>
+  {% else %}
+  <form method="post" action="/drivers" enctype="multipart/form-data">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="next" value="{{ next or '' }}">
+    <div class="field">
+      <label for="carrier_id">У какого перевозчика числится</label>
+      <select id="carrier_id" name="carrier_id" required>
+        <option value="">Выберите перевозчика</option>
+        {% for item in carriers %}
+        <option value="{{ item.id }}" {% if carrier_id == item.id %}selected{% endif %}>{{ item.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    {% with prefix='new', item=none %}{% include "driver_fields.html" %}{% endwith %}
+    <div class="fields">
+      <div class="field">
+        <label for="passport">Скан паспорта, PDF, JPG или PNG</label>
+        <input id="passport" name="passport" type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png">
+      </div>
+      <div class="field">
+        <label for="license">Скан ВУ, PDF, JPG или PNG</label>
+        <input id="license" name="license" type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png">
+      </div>
+    </div>
+    {% if can_write %}<p><button class="btn" type="submit">+ Добавить водителя</button></p>{% endif %}
+  </form>
+  {% endif %}
+</div>
+{% endblock %}

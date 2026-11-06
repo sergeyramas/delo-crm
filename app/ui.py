@@ -373,6 +373,7 @@ def page_card(request: Request, key: str):
         "org_card": org_card_brief(db, package["id"]),
         "haul": _haul(request, package),
         "tracks": _tracks(request, package),
+        "linked": _linked(request, package),
     })
     return templates.TemplateResponse(request, "card.html", ctx)
 
@@ -380,7 +381,19 @@ def page_card(request: Request, key: str):
 def _haul(request: Request, package: dict) -> dict:
     from app.carriers import haul_view
 
-    return haul_view(request.app.state.db, package, request.query_params.get("haul", ""))
+    return haul_view(
+        request.app.state.db,
+        package,
+        request.query_params.get("haul", ""),
+        request.query_params.get("client", ""),
+    )
+
+
+def _linked(request: Request, package: dict) -> list:
+    from app.carriers import package_linked_files
+
+    with request.app.state.db.tx() as conn:
+        return package_linked_files(conn, package)
 
 
 def _tracks(request: Request, package: dict) -> dict:

@@ -30,7 +30,25 @@
 </div>
 <div class="card" id="haul">
   <h2>Кто везёт</h2>
-  <p class="mut">Перевозчик, ТС и водитель из раздела «Перевозчики». Карточки контрагентов ниже — из заявки, со своими сканами на водителе. Это разные записи, файлы между ними не копируются. Выбор связки наружу ничего не отправляет.</p>
+  <p class="mut">Выбор из списков. «+ новый» открывает ту же форму, что кнопки в меню: поля и сканы вместе. Сканы выбранных карточек сами появляются в пакете документов. Наружу ничего не уходит.</p>
+  <p class="src">Заказчик</p>
+  <form class="status-form" method="get" action="/packages/{{ p.id }}#haul">
+    <div class="field">
+      <label for="client-q">Поиск заказчика</label>
+      <input id="client-q" name="client" type="search" value="{{ haul.client_q }}" placeholder="Название, ИНН или телефон" maxlength="80">
+    </div>
+    <button class="btn" type="submit">Найти</button>
+  </form>
+  <div class="haul" role="group" aria-label="Заказчики">
+    {% for item in haul.clients %}
+    <form method="post" action="/packages/{{ p.id }}/client">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="client_id" value="{{ item.id }}">
+      <button class="f {% if item.selected %}on{% endif %}" type="submit" {% if not can_write %}disabled{% endif %}>{{ item.name }}</button>
+    </form>
+    {% endfor %}
+    {% if can_write %}<a class="btn" href="/clients/new?next=/packages/{{ p.id }}">+ новый</a>{% endif %}
+  </div>
   <form class="status-form" method="get" action="/packages/{{ p.id }}#haul">
     <div class="field">
       <label for="haul-q">Поиск перевозчика</label>
@@ -38,7 +56,7 @@
     </div>
     <button class="btn" type="submit">Найти</button>
   </form>
-  <p class="src">Недавние и найденные</p>
+  <p class="src">Перевозчик</p>
   <div class="haul" role="group" aria-label="Перевозчики">
     {% for item in haul.carriers %}
     <form method="post" action="/packages/{{ p.id }}/assign">
@@ -47,12 +65,10 @@
       <input type="hidden" name="carrier_id" value="{{ item.id }}">
       <button class="f {% if item.selected %}on{% endif %}" type="submit" {% if not can_write %}disabled{% endif %}>{{ item.name }}</button>
     </form>
-    {% else %}
-    <span class="mut">В реестре пока нет перевозчиков. <a href="/carriers">Открыть раздел</a></span>
     {% endfor %}
+    {% if can_write %}<a class="btn" href="/carriers/new?next=/packages/{{ p.id }}">+ новый</a>{% endif %}
   </div>
-  {% if haul.carrier %}
-  <p class="src">ТС перевозчика {{ haul.carrier.name }}</p>
+  <p class="src">Машина{% if haul.carrier %} · {{ haul.carrier.name }}{% endif %}</p>
   <div class="haul" role="group" aria-label="Транспорт">
     {% for item in haul.vehicles %}
     <form method="post" action="/packages/{{ p.id }}/assign">
@@ -62,11 +78,10 @@
       {% if haul.driver %}<input type="hidden" name="driver_id" value="{{ haul.driver.id }}">{% endif %}
       <button class="f {% if item.selected %}on{% endif %}" type="submit" {% if not can_write %}disabled{% endif %}>{{ item.plate }} · {{ item.make_model[:42] }}</button>
     </form>
-    {% else %}
-    <span class="mut">ТС нет. <a href="/carriers/{{ haul.carrier.id }}?tab=vehicles">Добавить в карточке</a></span>
     {% endfor %}
+    {% if can_write %}<a class="btn" href="/vehicles/new?{% if haul.carrier %}carrier_id={{ haul.carrier.id }}&amp;{% endif %}next=/packages/{{ p.id }}">+ новый</a>{% endif %}
   </div>
-  <p class="src">Водители</p>
+  <p class="src">Водитель</p>
   <div class="haul" role="group" aria-label="Водители">
     {% for item in haul.drivers %}
     <form method="post" action="/packages/{{ p.id }}/assign">
@@ -76,12 +91,10 @@
       <input type="hidden" name="driver_id" value="{{ item.id }}">
       <button class="f {% if item.selected %}on{% endif %}" type="submit" {% if not can_write %}disabled{% endif %}>{{ item.name }}{% if item.user_is_carrier %} · он же перевозчик{% endif %}</button>
     </form>
-    {% else %}
-    <span class="mut">Водителей нет. <a href="/carriers/{{ haul.carrier.id }}?tab=drivers">Добавить в карточке</a></span>
     {% endfor %}
+    {% if can_write %}<a class="btn" href="/drivers/new?{% if haul.carrier %}carrier_id={{ haul.carrier.id }}&amp;{% endif %}next=/packages/{{ p.id }}">+ новый</a>{% endif %}
   </div>
   {% if haul.same_person %}<p class="src">Перевозчик и водитель — один человек. В трекере документов у них одна строка.</p>{% endif %}
-  {% endif %}
   {% if haul.ready %}
   <p class="ready" role="status">Готово: поля карточки и три скана (СТС, паспорт, ВУ) на месте.</p>
   {% else %}
@@ -154,7 +167,19 @@
   <div>
     <div class="card">
       <h2>Пакет документов</h2>
-      {% if not docs %}<p class="mut">В пакете пока нет файлов.</p>{% endif %}
+      {% if linked %}
+      <p class="src">Из карточек. Подтянулись сами, заново в сделку грузить не нужно.</p>
+      {% for item in linked %}
+      <div class="doc">
+        <div>
+          <b>{{ item.label }}</b>
+          <div class="mut">{{ item.who }} · {{ item.original_name }}</div>
+        </div>
+        <div><a class="dl" href="/fleet-files/{{ item.id }}">Скачать</a></div>
+      </div>
+      {% endfor %}
+      {% endif %}
+      {% if not docs and not linked %}<p class="mut">В пакете пока нет файлов.</p>{% endif %}
       {% for doc in docs %}
       <div class="doc">
         <div>

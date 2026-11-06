@@ -14,6 +14,10 @@ from app.carriers import (
     create_carrier,
     create_driver,
     create_vehicle,
+    list_clients,
+    list_drivers,
+    list_vehicles,
+    save_client_file,
     delete_carrier,
     delete_driver,
     delete_vehicle,
@@ -62,6 +66,46 @@ def _user(request: Request):
     return getattr(request.state, "user", None)
 
 
+def safe_next(value: str) -> str:
+    raw = (value or "").strip()
+    if not raw.startswith("/") or raw.startswith("//") or "\\" in raw or "://" in raw:
+        return ""
+    path = raw.split("?", 1)[0].split("#", 1)[0]
+    if path in {"/carriers", "/vehicles", "/drivers", "/clients"}:
+        return path
+    for prefix in ("/packages/", "/carriers/"):
+        if path.startswith(prefix) and path.removeprefix(prefix).isdigit():
+            return path
+    return ""
+
+
+async def _maybe_file(form, name: str) -> tuple[str, bytes]:
+    upload = form.get(name)
+    if upload is None or not getattr(upload, "filename", ""):
+        return "", b""
+    return getattr(upload, "filename", "") or "file", await _read_upload(upload)
+
+
+def _after(conn, form, kind: str, new_id: int, carrier_id: int | None, moment: str) -> str:
+    from app.carriers import attach_newcomer
+
+    nxt = safe_next(_form_last(form, "next"))
+    if nxt.startswith("/packages/"):
+        package = open_package(conn, nxt.rsplit("/", 1)[-1])
+        attach_newcomer(conn, package, kind, new_id, moment)
+        return nxt + "?note=saved#haul"
+    if nxt.startswith("/carriers/") and kind in {"vehicle", "driver"}:
+        tab = "drivers" if kind == "driver" else "vehicles"
+        return f"{nxt}?tab={tab}&note=saved"
+    if kind == "carrier":
+        return f"/carriers/{new_id}?note=saved"
+    if kind == "vehicle":
+        return f"/carriers/{carrier_id}?tab=vehicles&note=saved"
+    if kind == "driver":
+        return f"/carriers/{carrier_id}?tab=drivers&note=saved"
+    return "/clients?note=saved"
+
+
 def _opt(form, name: str):
     raw = _form_last(form, name).strip()
     if not raw:
@@ -85,22 +129,207 @@ def page_carriers(request: Request):
 @router.get("/carriers/new")
 def page_carrier_new(request: Request):
     ctx = base_ctx(request, "carriers")
-    ctx.update({"carrier": None})
+    ctx.update({"carrier": None, "next": safe_next(request.query_params.get("next", ""))})
     return templates.TemplateResponse(request, "carrier_form.html", ctx)
 
 
 @router.post("/carriers")
 async def page_carrier_create(request: Request):
     form = await request.form()
+    back = "/carriers/new"
     try:
         check_csrf(request, form.get("csrf"))
         require_writer(request)
-        payload = _carrier_payload(form)
+        filename, blob = await _maybe_file(form, "doc")
+        moment = now_iso()
         with request.app.state.db.tx() as conn:
-            saved = create_carrier(conn, payload, now_iso())
+            saved = create_carrier(conn, _carrier_payload(form), moment)
+            if blob:
+                save_fleet_file(
+                    conn, request.app.state.db.data_dir, saved["id"], "doc", filename, blob, moment,
+                )
+            target = _after(conn, form, "carrier", saved["id"], saved["id"], moment)
     except ApiError as exc:
-        return _fail(exc, "/carriers/new", "carrier")
-    return _redirect(f"/carriers/{saved['id']}?note=saved")
+        return _fail(exc, back, "carrier")
+    return _redirect(target)
+
+
+@router.get("/vehicles")
+def page_vehicles(request: Request):
+    query = request.query_params.get("q", "")
+    with request.app.state.db.tx() as conn:
+        rows = list_vehicles(conn, query)
+    ctx = base_ctx(request, "carriers")
+    ctx.update({"rows": rows, "q": query, "title": "Машины", "add_href": "/vehicles/new", "add_label": "+ Добавить машину"})
+    return templates.TemplateResponse(request, "fleet_list.html", ctx)
+
+
+@router.get("/vehicles/new")
+def page_vehicle_new(request: Request):
+    carrier_id = request.query_params.get("carrier_id", "")
+    with request.app.state.db.tx() as conn:
+        carriers = list_carriers(conn, "", limit=100)
+    ctx = base_ctx(request, "carriers")
+    ctx.update({
+        "carriers": carriers,
+        "carrier_id": int(carrier_id) if str(carrier_id).isdigit() else None,
+        "next": safe_next(request.query_params.get("next", "")),
+    })
+    return templates.TemplateResponse(request, "vehicle_new.html", ctx)
+
+
+@router.post("/vehicles")
+async def page_vehicle_new_save(request: Request):
+    form = await request.form()
+    try:
+        check_csrf(request, form.get("csrf"))
+        require_writer(request)
+        carrier_id = _opt(form, "carrier_id")
+        if not carrier_id:
+            raise ApiError(422, "Выберите перевозчика.")
+        filename, blob = await _maybe_file(form, "sts")
+        moment = now_iso()
+        with request.app.state.db.tx() as conn:
+            saved = create_vehicle(conn, carrier_id, _vehicle_payload(form), moment)
+            if blob:
+                save_fleet_file(
+                    conn, request.app.state.db.data_dir, carrier_id, "sts", filename, blob, moment,
+                    vehicle_id=saved["id"],
+                )
+            target = _after(conn, form, "vehicle", saved["id"], carrier_id, moment)
+    except ApiError as exc:
+        return _fail(exc, "/vehicles/new", "fields")
+    return _redirect(target)
+
+
+@router.get("/drivers")
+def page_drivers(request: Request):
+    query = request.query_params.get("q", "")
+    with request.app.state.db.tx() as conn:
+        rows = list_drivers(conn, query)
+    ctx = base_ctx(request, "carriers")
+    ctx.update({"rows": rows, "q": query, "title": "Водители", "add_href": "/drivers/new", "add_label": "+ Добавить водителя"})
+    return templates.TemplateResponse(request, "fleet_list.html", ctx)
+
+
+@router.get("/drivers/new")
+def page_driver_new(request: Request):
+    carrier_id = request.query_params.get("carrier_id", "")
+    with request.app.state.db.tx() as conn:
+        carriers = list_carriers(conn, "", limit=100)
+    ctx = base_ctx(request, "carriers")
+    ctx.update({
+        "carriers": carriers,
+        "carrier_id": int(carrier_id) if str(carrier_id).isdigit() else None,
+        "next": safe_next(request.query_params.get("next", "")),
+    })
+    return templates.TemplateResponse(request, "driver_new.html", ctx)
+
+
+@router.post("/drivers")
+async def page_driver_new_save(request: Request):
+    form = await request.form()
+    try:
+        check_csrf(request, form.get("csrf"))
+        require_writer(request)
+        carrier_id = _opt(form, "carrier_id")
+        if not carrier_id:
+            raise ApiError(422, "Выберите перевозчика.")
+        passport_name, passport = await _maybe_file(form, "passport")
+        license_name, license_blob = await _maybe_file(form, "license")
+        moment = now_iso()
+        with request.app.state.db.tx() as conn:
+            saved = create_driver(conn, carrier_id, _driver_payload(form), moment)
+            if passport:
+                save_fleet_file(
+                    conn, request.app.state.db.data_dir, carrier_id, "passport", passport_name, passport, moment,
+                    driver_id=saved["id"],
+                )
+            if license_blob:
+                save_fleet_file(
+                    conn, request.app.state.db.data_dir, carrier_id, "license", license_name, license_blob, moment,
+                    driver_id=saved["id"],
+                )
+            target = _after(conn, form, "driver", saved["id"], carrier_id, moment)
+    except ApiError as exc:
+        return _fail(exc, "/drivers/new", "fields")
+    return _redirect(target)
+
+
+@router.get("/clients")
+def page_clients(request: Request):
+    query = request.query_params.get("q", "")
+    with request.app.state.db.tx() as conn:
+        rows = list_clients(conn, query)
+    ctx = base_ctx(request, "carriers")
+    ctx.update({"rows": rows, "q": query})
+    return templates.TemplateResponse(request, "clients.html", ctx)
+
+
+@router.get("/clients/new")
+def page_client_new(request: Request):
+    ctx = base_ctx(request, "carriers")
+    ctx.update({"next": safe_next(request.query_params.get("next", ""))})
+    return templates.TemplateResponse(request, "client_form.html", ctx)
+
+
+@router.post("/clients")
+async def page_client_create(request: Request):
+    from app.parties import upsert_party
+
+    form = await request.form()
+    try:
+        check_csrf(request, form.get("csrf"))
+        require_writer(request)
+        name = _form_last(form, "name").strip()
+        if not name:
+            raise ApiError(422, "Нужно наименование заказчика.")
+        filename, blob = await _maybe_file(form, "doc")
+        moment = now_iso()
+        with request.app.state.db.tx() as conn:
+            party_id = upsert_party(
+                conn,
+                request.app.state.settings,
+                "client",
+                {
+                    "name": name,
+                    "contact_name": _form_last(form, "contact_name"),
+                    "company": _form_last(form, "company") or name,
+                    "phone": _form_last(form, "phone"),
+                    "email": _form_last(form, "email"),
+                    "inn": _form_last(form, "inn"),
+                    "note": _form_last(form, "note"),
+                },
+                moment,
+            )
+            if not party_id:
+                raise ApiError(422, "Не удалось записать заказчика.")
+            if blob:
+                save_client_file(conn, request.app.state.db.data_dir, party_id, filename, blob, moment)
+            target = _after(conn, form, "client", party_id, None, moment)
+    except ApiError as exc:
+        return _fail(exc, "/clients/new", "fields")
+    return _redirect(target)
+
+
+@router.post("/packages/{key}/client")
+async def page_client_pick(request: Request, key: str):
+    from app.carriers import attach_newcomer
+
+    form = await request.form()
+    try:
+        check_csrf(request, form.get("csrf"))
+        require_writer(request)
+        client_id = _opt(form, "client_id")
+        if not client_id:
+            raise ApiError(422, "Выберите заказчика.")
+        package = _one(request.app.state.db, key)
+        with request.app.state.db.tx() as conn:
+            raw = open_package(conn, str(package["id"]))
+            attach_newcomer(conn, raw, "client", client_id, now_iso())
+    except ApiError as exc:
+        return _fail(exc, f"/packages/{key}", "haul")
+    return _redirect(f"/packages/{package['id']}?note=assigned#haul")
 
 
 @router.get("/carriers/expeditor")
