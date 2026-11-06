@@ -1,5 +1,7 @@
 # /etc/systemd/system/delo-crm.service
-# Порт по умолчанию 8091. Если в env другой PORT, поправьте и nginx.
+# Порт по умолчанию 8091 на 127.0.0.1 хоста.
+# Если в env другой PORT, поправьте upstream 172.18.0.1 в /data/nginx/user_conf.d/.
+# На Ядре nginx в Docker. /etc/nginx/sites-available и systemctl reload nginx не используются.
 # Секреты только в EnvironmentFile, не в этом юните.
 # systemd читает файлы от root до User=delo, поэтому mode 600 в /root подходит.
 # Минус перед путём: нет файла — юнит всё равно стартует.

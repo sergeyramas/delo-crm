@@ -5,8 +5,9 @@
 
 DELO_CRM_URL — база, без слэша в конце. На Ядре надёжно http://127.0.0.1:8091.
 DELO_CRM_INBOUND_SECRET — та же строка, что INBOUND_SECRET у CRM.
-DELO_CRM_CONNECT — необязательно. IP, куда открыть TCP, если URL — живое имя,
-а nginx пускает /s/ только с 127.0.0.1. Пример: 127.0.0.1.
+DELO_CRM_CONNECT — необязательно. IP, куда открыть TCP, если URL — живое имя
+(SNI остаётся из URL). На Ядре nginx в Docker и /s/ с loopback не ограничивает,
+поэтому переменную не задавать.
 """
 
 from __future__ import annotations
