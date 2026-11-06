@@ -1,0 +1,4 @@
+<nav class="tabs" aria-label="Разделы сделки">
+  <a href="/packages/{{ p.id }}" {% if deal_tab == 'card' %}class="on" aria-current="page"{% endif %}>Сделка</a>
+  <a href="/packages/{{ p.id }}/messages" {% if deal_tab == 'messages' %}class="on" aria-current="page"{% endif %}>Переписка · {{ message_count }}</a>
+</nav>

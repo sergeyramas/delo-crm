@@ -204,6 +204,37 @@ details.fleet summary{cursor:pointer;font-weight:700;min-height:44px}
 button.f{font:inherit;cursor:pointer}
 button.f:disabled{opacity:.55;cursor:not-allowed}
 button:disabled{opacity:.55}
+.status-form fieldset{border:0;padding:0;margin:0;min-width:0}
+.tabs{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 16px}
+.tabs a{text-decoration:none;font-weight:700;padding:8px 14px;border-radius:8px;border:2px solid #0f2a4a;color:#0f2a4a;min-height:44px;display:inline-flex;align-items:center}
+.tabs a.on{background:#0f2a4a;color:#fff}
+.tabs a:focus-visible{outline:3px solid #ea580c;outline-offset:2px}
+h2.gap{margin-top:16px}
+.msg h3{margin:6px 0;font-size:15px}
+.msg p{margin:6px 0}
+a.deal-link{font-weight:700;display:inline-flex;align-items:center;min-height:44px;padding:4px 0}
+.bind{display:flex;flex-wrap:wrap;gap:8px;align-items:end;margin-top:8px}
+.bind .field{min-width:220px;flex:1}
+.reply fieldset{border:0;padding:0;margin:0}
+.badge.queued{background:#64748b}
+.badge.sent{background:#7c3aed}
+.badge.delivered{background:#16a34a}
+.badge.failed{background:#b91c1c}
+.badge.received{background:#2563eb}
+.badge.read{background:#0891b2}
+.badge.in{background:#0f766e}
+.badge.out{background:#ea580c}
+.badge.email{background:#7c3aed}
+.badge.tg{background:#2563eb}
+.badge.max{background:#ea580c}
+a.f.f-max{border-color:#ea580c;color:#9a3412;background:#fff}
+a.f.f-in{border-color:#0f766e;color:#0f766e;background:#fff}
+a.f.f-out{border-color:#9a3412;color:#9a3412;background:#fff}
+a.f.f-loose{border-color:#b45309;color:#9a3412;background:#fff7ed}
+a.f.is-on.f-max{background:#ea580c;color:#fff}
+a.f.is-on.f-in{background:#0f766e;color:#fff}
+a.f.is-on.f-out{background:#9a3412;color:#fff}
+a.f.is-on.f-loose{background:#b45309;color:#fff}
 
 @container (width < 900px){
   table,thead,tbody,tr,td,th{display:block}

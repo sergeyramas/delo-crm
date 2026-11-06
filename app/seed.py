@@ -1,4 +1,4 @@
-"""Демо-сделки с макетов 06.11.2026. Не для боевой базы: номера 0001–0009 занимаются явно.
+"""Демо-сделки с макетов 06.11.2026 и демо-переписка. Не для боевой базы: номера 0001–0009 занимаются явно.
 
 Запуск: python -m app.seed
 Повтор: python -m app.seed --force  (базу под /srv не трогает)
@@ -269,6 +269,7 @@ def _times(item: dict) -> dict:
 
 def _wipe(conn) -> None:
     for table in (
+        "messages",
         "package_doc_tracks",
         "negotiations",
         "fleet_files",
@@ -341,6 +342,155 @@ def _enrich(conn, settings) -> None:
             (kind, name),
         ).fetchone()
         upsert_party(conn, settings, kind, fields, moment, int(row["id"]) if row else None)
+
+
+DEMO_MESSAGES = [
+    {
+        "number": "Д-2026-0001",
+        "channel": "email",
+        "direction": "out",
+        "status": "sent",
+        "subject": "Заявка Д-2026-0001 Москва → Казань",
+        "body_text": "Запись письма, которое ушло вручную, не из CRM. Живой почтовый адаптер не вызывался.",
+        "external_id": "seed-email-0001-out",
+        "thread_key": "thread-0001",
+        "author_user": "perevozchik21ru",
+        "party": ("carrier", "ИП Орлов К.В."),
+        "sent_at": "2026-11-03T15:05:00",
+        "created_at": "2026-11-03T15:05:00",
+    },
+    {
+        "number": "Д-2026-0001",
+        "channel": "email",
+        "direction": "in",
+        "status": "received",
+        "subject": "Подписанный скан заявки Д-2026-0001",
+        "body_text": "Иванова М. прислала подписанный скан. Это запись входящего: почту CRM сама не читает.",
+        "external_id": "seed-email-0001-in",
+        "thread_key": "thread-0001",
+        "author_user": "Иванова М.",
+        "party": ("client", "ООО «Северный Хлеб»"),
+        "sent_at": "2026-11-04T09:28:00",
+        "received_at": "2026-11-04T09:30:00",
+        "created_at": "2026-11-04T09:30:00",
+    },
+    {
+        "number": "Д-2026-0001",
+        "channel": "max",
+        "direction": "out",
+        "status": "delivered",
+        "subject": "",
+        "body_text": "Погрузка сегодня в 08:00, склад Москва, ул. Примерная 1. Факт в карточке, MAX наружу не ходил.",
+        "external_id": "seed-max-0001-out",
+        "thread_key": "max-orlov",
+        "author_user": "MAX-бот",
+        "party": ("driver", "Орлов К."),
+        "sent_at": "2026-11-05T06:40:00",
+        "delivered_at": "2026-11-05T06:41:00",
+        "created_at": "2026-11-05T06:40:00",
+    },
+    {
+        "number": "Д-2026-0001",
+        "channel": "tg",
+        "direction": "in",
+        "status": "read",
+        "subject": "",
+        "body_text": "Загрузился, выехал. 18 паллет.",
+        "external_id": "seed-tg-0001-in",
+        "thread_key": "tg-orlov",
+        "author_user": "Орлов К.",
+        "party": ("driver", "Орлов К."),
+        "received_at": "2026-11-05T11:15:00",
+        "created_at": "2026-11-05T11:15:00",
+    },
+    {
+        "number": "Д-2026-0002",
+        "channel": "email",
+        "direction": "in",
+        "status": "received",
+        "subject": "Ждём скан АО «ТехноСклад»",
+        "body_text": "Письмо по Тверь → Санкт-Петербург ещё без подписанного скана.",
+        "external_id": "seed-email-0002-in",
+        "thread_key": "thread-0002",
+        "author_user": "АО «ТехноСклад»",
+        "sent_at": "2026-11-06T12:08:00",
+        "received_at": "2026-11-06T12:10:00",
+        "created_at": "2026-11-06T12:10:00",
+    },
+    {
+        "number": "Д-2026-0003",
+        "channel": "tg",
+        "direction": "out",
+        "status": "queued",
+        "subject": "",
+        "body_text": "Черновик в очереди. Кнопка отправки выключена, в Telegram не уходило.",
+        "external_id": "seed-tg-0003-out",
+        "thread_key": "tg-0003",
+        "author_user": "Андрей",
+        "created_at": "2026-11-06T17:20:00",
+    },
+    {
+        "number": "",
+        "channel": "email",
+        "direction": "in",
+        "status": "received",
+        "subject": "Заявка на Казань, без номера",
+        "body_text": "Письмо пришло раньше, чем заявку завели. Привяжите его к сделке вручную.",
+        "external_id": "seed-email-unbound",
+        "thread_key": "thread-loose",
+        "author_user": "sklad@example.ru",
+        "sent_at": "2026-11-06T16:02:00",
+        "received_at": "2026-11-06T16:05:00",
+        "created_at": "2026-11-06T16:05:00",
+    },
+    {
+        "number": "",
+        "channel": "max",
+        "direction": "in",
+        "status": "received",
+        "subject": "",
+        "body_text": "Водитель написал в MAX до того, как карточку нашли. Сообщение не привязано.",
+        "external_id": "seed-max-unbound",
+        "thread_key": "max-loose",
+        "author_user": "неизвестный номер",
+        "received_at": "2026-11-06T18:02:00",
+        "created_at": "2026-11-06T18:02:00",
+    },
+]
+
+
+def _party_id(conn, kind: str, name: str) -> int | None:
+    row = conn.execute(
+        "SELECT id FROM parties WHERE kind = ? AND name = ? COLLATE NOCASE ORDER BY id LIMIT 1",
+        (kind, name),
+    ).fetchone()
+    return int(row["id"]) if row else None
+
+
+def _messages(conn, pkg: dict[str, int]) -> None:
+    from app.messages import store_message
+
+    for item in DEMO_MESSAGES:
+        number = item["number"]
+        party = item.get("party")
+        store_message(conn, {
+            "package_id": pkg.get(number) if number else None,
+            "party_id": _party_id(conn, party[0], party[1]) if party else None,
+            "channel": item["channel"],
+            "direction": item["direction"],
+            "status": item["status"],
+            "subject": item["subject"],
+            "body_text": item["body_text"],
+            "body_html": "",
+            "external_id": item["external_id"],
+            "thread_key": item["thread_key"],
+            "sent_at": item.get("sent_at", ""),
+            "delivered_at": item.get("delivered_at", ""),
+            "received_at": item.get("received_at", ""),
+            "author_user": item["author_user"],
+            "meta": {"seed": True},
+            "created_at": item["created_at"],
+        })
 
 
 def main() -> int:
@@ -424,6 +574,7 @@ def main() -> int:
 
         backfill_conn(conn, settings, "2026-11-06T18:05:00")
         _enrich(conn, settings)
+        _messages(conn, pkg)
         from app.carriers import seed_doronin, seed_negotiations, seed_package_link
         from app.tracks import sync_from_package
 

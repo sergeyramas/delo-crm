@@ -192,6 +192,30 @@ CREATE INDEX IF NOT EXISTS idx_parties_kind_phone ON parties(kind, phone_key);
 CREATE INDEX IF NOT EXISTS idx_parties_kind_email ON parties(kind, email_key);
 CREATE INDEX IF NOT EXISTS idx_outbound_party ON outbound_messages(party_id, id);
 
+CREATE TABLE IF NOT EXISTS messages (
+    id INTEGER PRIMARY KEY,
+    package_id INTEGER REFERENCES packages(id) ON DELETE SET NULL,
+    party_id INTEGER REFERENCES parties(id) ON DELETE SET NULL,
+    channel TEXT NOT NULL,
+    direction TEXT NOT NULL,
+    status TEXT NOT NULL,
+    subject TEXT NOT NULL DEFAULT '',
+    body_text TEXT NOT NULL DEFAULT '',
+    body_html TEXT NOT NULL DEFAULT '',
+    external_id TEXT NOT NULL DEFAULT '',
+    thread_key TEXT NOT NULL DEFAULT '',
+    sent_at TEXT NOT NULL DEFAULT '',
+    delivered_at TEXT NOT NULL DEFAULT '',
+    received_at TEXT NOT NULL DEFAULT '',
+    author_user TEXT NOT NULL DEFAULT '',
+    meta_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_messages_pkg_sent ON messages(package_id, sent_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_channel_ext
+    ON messages(channel, external_id) WHERE external_id <> '';
+
 CREATE TABLE IF NOT EXISTS party_scans (
     id INTEGER PRIMARY KEY,
     party_id INTEGER NOT NULL REFERENCES parties(id) ON DELETE CASCADE,

@@ -99,6 +99,8 @@ ERRS = {
     "carrier": "Проверьте карточку перевозчика.",
     "haul": "Не удалось записать связку. Проверьте перевозчика, ТС и водителя.",
     "gap": "Сначала выберите перевозчика, ТС и водителя.",
+    "package": "Заявка не найдена. Укажите номер, например Д-2026-0001.",
+    "message": "Сообщение не найдено.",
 }
 
 WROTE = {
@@ -110,6 +112,7 @@ WROTE = {
     "assembled": "Карточка перевозчика собрана в пакете. Письмо и MAX не отправлялись.",
     "saved": "Сохранено.",
     "nego": "Заметка переговоров записана.",
+    "bound": "Сообщение привязано к заявке. Наружу ничего не ушло.",
 }
 
 
@@ -275,11 +278,37 @@ def _tasks(db) -> list[dict]:
     return rows
 
 
-def _redirect(path: str, err: str | None = None) -> RedirectResponse:
+def _redirect(path: str, err: str | None = None, note: str | None = None) -> RedirectResponse:
+    extra = []
     if err:
+        extra.append(f"err={err}")
+    if note:
+        extra.append(f"note={note}")
+    if extra:
         join = "&" if "?" in path else "?"
-        path = f"{path}{join}err={err}"
+        path = f"{path}{join}" + "&".join(extra)
     return RedirectResponse(path, status_code=303)
+
+
+def _safe_back(raw: str, fallback: str) -> str:
+    if not raw or not raw.startswith("/") or raw.startswith("//") or "\\" in raw:
+        return fallback
+    if not (raw.startswith("/messages") or raw.startswith("/packages/")):
+        return fallback
+    return raw
+
+
+def messages_href(channel: str = "", direction: str = "", package: str = "", unbound: bool = False) -> str:
+    params = {}
+    if channel:
+        params["channel"] = channel
+    if direction:
+        params["direction"] = direction
+    if package and not unbound:
+        params["package"] = package
+    if unbound:
+        params["unbound"] = "1"
+    return "/messages?" + urlencode(params) if params else "/messages"
 
 
 @router.get("/")
@@ -374,6 +403,8 @@ def page_card(request: Request, key: str):
         "haul": _haul(request, package),
         "tracks": _tracks(request, package),
         "linked": _linked(request, package),
+        "deal_tab": "card",
+        "message_count": _message_count(db, package["id"]),
     })
     return templates.TemplateResponse(request, "card.html", ctx)
 
@@ -441,6 +472,140 @@ def page_feed(request: Request, key: str):
         "feed_cap": FEED_CAP,
     })
     return templates.TemplateResponse(request, "feed.html", ctx)
+
+
+def _message_count(db, package_id: int) -> int:
+    from app.messages import count_for_package
+
+    return count_for_package(db, package_id)
+
+
+def _chip(code: str, label: str, css: str, count: int, on: bool, href: str) -> dict:
+    return {"code": code, "label": label, "class": css, "count": count, "on": on, "href": href}
+
+
+@router.get("/messages")
+def page_messages(request: Request):
+    from app.domain import MESSAGE_CHANNELS, MESSAGE_DIRECTIONS
+    from app.messages import feed_state
+
+    db = request.app.state.db
+    channel = request.query_params.get("channel", "")
+    direction = request.query_params.get("direction", "")
+    package = request.query_params.get("package", "")
+    unbound = request.query_params.get("unbound", "") == "1"
+    state = feed_state(db, channel, direction, package, unbound)
+    channel_filters = [
+        _chip(
+            "",
+            "Все каналы",
+            "f-all",
+            state["channel_counts"]["all"],
+            state["channel"] == "",
+            messages_href("", state["direction"], state["package_query"], state["unbound"]),
+        )
+    ]
+    for item in MESSAGE_CHANNELS:
+        code = item["code"]
+        channel_filters.append(_chip(
+            code,
+            item["label"],
+            item["class"],
+            state["channel_counts"][code],
+            state["channel"] == code,
+            messages_href(code, state["direction"], state["package_query"], state["unbound"]),
+        ))
+    direction_filters = [
+        _chip(
+            "",
+            "Все",
+            "f-all",
+            state["direction_counts"]["all"],
+            state["direction"] == "",
+            messages_href(state["channel"], "", state["package_query"], state["unbound"]),
+        )
+    ]
+    for item in MESSAGE_DIRECTIONS:
+        code = item["code"]
+        direction_filters.append(_chip(
+            code,
+            item["label"],
+            item["class"],
+            state["direction_counts"][code],
+            state["direction"] == code,
+            messages_href(state["channel"], code, state["package_query"], state["unbound"]),
+        ))
+    loose_on = state["unbound"]
+    ctx = base_ctx(request, "messages")
+    ctx.update({
+        "messages": state["messages"],
+        "total": state["total"],
+        "truncated": state["truncated"],
+        "cap": state["cap"],
+        "channel_filters": channel_filters,
+        "direction_filters": direction_filters,
+        "package_query": state["package_query"],
+        "channel": state["channel"],
+        "direction": state["direction"],
+        "unbound": loose_on,
+        "loose_href": messages_href(state["channel"], state["direction"], "", True),
+        "loose_count": state["unbound_count"],
+        "all_href": messages_href(state["channel"], state["direction"], "", False),
+        "filter_notes": state["notes"],
+        "unknown_package": state["unknown_package"],
+        "back": messages_href(state["channel"], state["direction"], state["package_query"], loose_on),
+    })
+    return templates.TemplateResponse(request, "messages.html", ctx)
+
+
+@router.get("/packages/{key}/messages")
+def page_package_messages(request: Request, key: str):
+    from app.messages import messages_of_package
+
+    db = request.app.state.db
+    try:
+        package = _one(db, key)
+    except ApiError:
+        ctx = base_ctx(request, "card")
+        return templates.TemplateResponse(request, "missing.html", ctx, status_code=404)
+    from app.domain import MESSAGE_CAP
+
+    messages, total = messages_of_package(db, package["id"])
+    ctx = base_ctx(request, "card", current_id=package["id"])
+    ctx.update({
+        "p": package,
+        "messages": messages,
+        "message_count": total,
+        "deal_tab": "messages",
+        "truncated": total > len(messages),
+        "cap": MESSAGE_CAP,
+    })
+    return templates.TemplateResponse(request, "package_messages.html", ctx)
+
+
+@router.post("/messages/{message_id}/bind")
+async def message_bind_form(request: Request, message_id: int):
+    from app.messages import bind_message
+
+    form = await request.form()
+    back = _safe_back(_form_last(form, "back"), "/messages?unbound=1")
+    try:
+        check_csrf(request, form.get("csrf"))
+        saved = bind_message(
+            request.app.state.db,
+            message_id,
+            _form_last(form, "package"),
+            actor_name(request),
+        )
+    except ApiError as exc:
+        if exc.message == "csrf":
+            code = "csrf"
+        elif exc.message == "Пакет не найден.":
+            code = "package"
+        else:
+            code = "message"
+        return _redirect(back, code)
+    return _redirect(f"/packages/{saved['package_id']}/messages", note="bound")
 
 
 def _form_last(form, name: str) -> str:

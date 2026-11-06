@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}ATI Delivery · CRM — карточка {{ p.number }}{% endblock %}
 {% block body %}
+{% include "_deal_tabs.html" %}
 <div class="card split">
   <div>
     <div class="mut"><a href="/">← Список сделок</a></div>
@@ -203,6 +204,7 @@
       {% endfor %}
       {% if not events %}<p class="mut">Событий пока нет.</p>{% endif %}
       <div class="mut"><a href="/packages/{{ p.id }}/feed">Полная лента — экран «Лента»</a> · {{ event_count }}</div>
+      <div class="mut"><a href="/packages/{{ p.id }}/messages">Переписка по этой сделке</a> · {{ message_count }}</div>
     </div>
   </div>
   <div>
