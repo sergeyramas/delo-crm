@@ -26,6 +26,7 @@
 </header>
 <main id="main" class="wrap">
   {% if err %}<div class="banner" role="alert">{{ err }}</div>{% endif %}
+  {% if note %}<div class="banner ok" role="status">{{ note }}</div>{% endif %}
   {% block body %}{% endblock %}
 </main>
 </body>

@@ -268,8 +268,71 @@ def _times(item: dict) -> dict:
 
 
 def _wipe(conn) -> None:
-    for table in ("tasks", "documents", "events", "files", "packages", "clients", "year_counters"):
+    for table in (
+        "outbound_messages",
+        "tasks",
+        "documents",
+        "events",
+        "files",
+        "packages",
+        "parties",
+        "clients",
+        "year_counters",
+    ):
         conn.execute(f"DELETE FROM {table}")
+
+
+def _enrich(conn, settings) -> None:
+    """Вымышленные телефоны и документы макета. Не боевые контакты."""
+    from app.parties import upsert_party
+
+    moment = "2026-11-06T18:10:00"
+    specs = [
+        (
+            "client",
+            "ООО «Северный Хлеб»",
+            {
+                "name": "ООО «Северный Хлеб»",
+                "contact_name": "Иванова М.",
+                "company": "ООО «Северный Хлеб»",
+                "email": "docs@example.ru",
+                "phone": "+7 (495) 111-11-11",
+                "inn": "7701123456",
+                "note": "грузовладелец",
+            },
+        ),
+        (
+            "carrier",
+            "ИП Орлов К.В.",
+            {
+                "name": "ИП Орлов К.В.",
+                "company": "ИП Орлов К.В.",
+                "email": "orlov@example.ru",
+                "phone": "+7 903 000-00-22",
+                "inn": "770200000020",
+                "contract": "договор № 105",
+            },
+        ),
+        (
+            "driver",
+            "Орлов К.",
+            {
+                "name": "Орлов К.",
+                "phone": "+7 903 555-00-10",
+                "vehicle": "тент",
+                "plate": "А123ВС 777",
+                "license_no": "77 00 123456",
+                "passport_no": "4500 000000",
+                "channel": "MAX-бот",
+            },
+        ),
+    ]
+    for kind, name, fields in specs:
+        row = conn.execute(
+            "SELECT id FROM parties WHERE kind = ? AND name = ? COLLATE NOCASE ORDER BY id LIMIT 1",
+            (kind, name),
+        ).fetchone()
+        upsert_party(conn, settings, kind, fields, moment, int(row["id"]) if row else None)
 
 
 def main() -> int:
@@ -349,6 +412,10 @@ def main() -> int:
                    VALUES (?, ?, ?, ?, ?, ?)""",
                 (pkg[number], title, bucket, due, assignee, "2026-11-06T09:00:00"),
             )
+        from app.parties import backfill_conn
+
+        backfill_conn(conn, settings, "2026-11-06T18:05:00")
+        _enrich(conn, settings)
     print(f"Макет: 9 сделок в {settings.sqlite_path}. Следующий живой номер 2026 года будет Д-2026-0010.")
     return 0
 

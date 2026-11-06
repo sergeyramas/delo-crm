@@ -54,9 +54,21 @@ async def inbound(request: Request):
 
 
 @router.get("/s/packages")
-def packages(request: Request, status: str | None = None, stage: str | None = None):
+def packages(
+    request: Request,
+    status: str | None = None,
+    stage: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+):
     require_secret(request)
-    return {"packages": list_packages(request.app.state.db, status=status or None, stage=stage or None)}
+    return list_packages(
+        request.app.state.db,
+        status=status or None,
+        stage=stage or None,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.get("/s/packages/{key}")

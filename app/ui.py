@@ -14,37 +14,69 @@ from fastapi.templating import Jinja2Templates
 from app.domain import (
     BUCKETS,
     DOC_CLASS,
+    FEED_CAP,
     FEED_FILTERS,
     KANBAN,
+    KANBAN_CAP,
+    LIST_PAGE_SIZE,
     STAGES,
     STATUSES,
+    TASK_CAP,
     fmt_dt,
     now_iso,
 )
+from app.auth import role_label
 from app.logic import (
     ApiError,
     add_note,
     add_task,
     apply_patch,
     file_path,
-    kpis,
     move_task,
+    package_stats,
     save_upload,
     view_event,
     view_package_row,
+)
+from app.messengers import mode_note
+from app.parties import (
+    KIND_LABEL,
+    MS_LABEL,
+    TG_ACTOR,
+    load_party,
+    party_deals,
+    party_messages,
+    public_party,
+    recheck_party,
+    record_outbound,
+    telegram_signature,
+    whatsapp_href,
 )
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
 
 
-def stage_href(stage: str, status: str) -> str:
+def stage_href(stage: str, status: str, page: int = 1) -> str:
     params = {}
     if stage:
         params["stage"] = stage
     if status:
         params["status"] = status
+    if page > 1:
+        params["page"] = str(page)
     return "/?" + urlencode(params) if params else "/"
+
+
+def _page_num(raw: str) -> int:
+    if not raw or not str(raw).isdigit():
+        return 1
+    page = int(raw)
+    if page < 1:
+        return 1
+    if page > 10000:
+        return 10000
+    return page
 
 
 templates.env.globals["stage_href"] = stage_href
@@ -58,6 +90,15 @@ ERRS = {
     "empty": "Пустая заметка.",
     "task": "Не удалось записать задачу.",
     "fields": "Проверьте поля формы.",
+    "confirm": "Отправка только после подтверждения. Сообщение не ушло.",
+    "write": "Не удалось записать сообщение.",
+    "party": "Карточка не найдена.",
+}
+
+WROTE = {
+    "local": "Текст записан в CRM от имени «Ассистент Андрея». В Telegram он не уходил: это заглушка.",
+    "not_sent": "Наружу ничего не ушло. Черновик лежит в этой карточке.",
+    "checked": "Отметки мессенджеров обновлены.",
 }
 
 
@@ -78,44 +119,85 @@ def latest_id(db) -> int | None:
     return int(row["id"]) if row else None
 
 
+def actor_name(request: Request) -> str:
+    user = getattr(request.state, "user", None)
+    if user:
+        return user["display_name"]
+    return request.app.state.settings.display_name
+
+
 def base_ctx(request: Request, active: str, current_id: int | None = None) -> dict:
     db = request.app.state.db
     if current_id is None:
         current_id = latest_id(db)
+    user = getattr(request.state, "user", None)
+    if user:
+        who = f"{user['display_name']} · {role_label(user['role_code'])}"
+    else:
+        who = request.app.state.settings.display_name
     return {
         "request": request,
         "active": active,
-        "who": request.app.state.settings.display_name,
+        "who": who,
         "csrf": request.state.csrf,
         "current_id": current_id,
         "err": ERRS.get(request.query_params.get("err", ""), ""),
+        "note": WROTE.get(request.query_params.get("note", ""), ""),
         "stages": STAGES,
         "statuses": STATUSES,
     }
 
 
-def _rows(db) -> list[dict]:
+PACKAGE_FROM = """
+    FROM packages p
+    LEFT JOIN parties c ON c.id = p.client_id AND c.kind = 'client'
+    LEFT JOIN clients cl ON cl.id = p.client_id
+    LEFT JOIN parties ca ON ca.id = p.carrier_party_id
+    LEFT JOIN parties dr ON dr.id = p.driver_party_id
+"""
+
+PACKAGE_SELECT = f"""
+    SELECT p.*,
+           COALESCE(c.name, cl.name, '') AS client_name,
+           COALESCE(c.contact_name, cl.contact_name, '') AS client_contact,
+           COALESCE(c.email, cl.email, '') AS client_email,
+           COALESCE(c.phone, cl.phone, '') AS client_phone,
+           COALESCE(c.note, cl.note, '') AS client_note,
+           COALESCE(c.inn, '') AS client_inn,
+           COALESCE(c.company, '') AS client_company,
+           c.id AS client_party_id,
+           ca.phone AS carrier_phone,
+           ca.inn AS carrier_inn,
+           ca.company AS carrier_company,
+           dr.phone AS driver_phone,
+           dr.email AS driver_email,
+           COALESCE(dr.license_no, '') AS license_no,
+           COALESCE(dr.passport_no, '') AS passport_no
+    {PACKAGE_FROM}
+"""
+
+
+def _rows(db, stage: str = "", status: str = "", limit: int = LIST_PAGE_SIZE, offset: int = 0) -> tuple[list[dict], int]:
+    where = []
+    args: list = []
+    if stage:
+        where.append("p.stage = ?")
+        args.append(stage)
+    if status:
+        where.append("p.status = ?")
+        args.append(status)
+    clause = (" WHERE " + " AND ".join(where)) if where else ""
+    total = db.one(f"SELECT COUNT(*) AS n FROM packages p{clause}", tuple(args))["n"]
     raw = db.q(
-        """
-        SELECT p.*, c.name AS client_name, c.contact_name AS client_contact,
-               c.email AS client_email, c.phone AS client_phone, c.note AS client_note
-        FROM packages p
-        LEFT JOIN clients c ON c.id = p.client_id
-        ORDER BY p.updated_at DESC, p.id DESC
-        """
+        PACKAGE_SELECT + clause + " ORDER BY p.updated_at DESC, p.id DESC LIMIT ? OFFSET ?",
+        tuple(args) + (int(limit), int(offset)),
     )
-    return [view_package_row(row) for row in raw]
+    return [view_package_row(row) for row in raw], int(total)
 
 
 def _one(db, key: str) -> dict:
     rows = db.q(
-        """
-        SELECT p.*, c.name AS client_name, c.contact_name AS client_contact,
-               c.email AS client_email, c.phone AS client_phone, c.note AS client_note
-        FROM packages p
-        LEFT JOIN clients c ON c.id = p.client_id
-        WHERE p.id = ? OR p.number = ?
-        """,
+        PACKAGE_SELECT + " WHERE p.id = ? OR p.number = ?",
         (int(key) if str(key).isdigit() else -1, str(key)),
     )
     if not rows:
@@ -123,12 +205,17 @@ def _one(db, key: str) -> dict:
     return view_package_row(rows[0])
 
 
-def _events(db, package_id: int) -> list[dict]:
+def _events(db, package_id: int, limit: int = FEED_CAP) -> tuple[list[dict], int]:
+    total = db.one("SELECT COUNT(*) AS n FROM events WHERE package_id = ?", (package_id,))["n"]
     rows = db.q(
-        "SELECT * FROM events WHERE package_id = ? ORDER BY created_at, id",
-        (package_id,),
+        """
+        SELECT * FROM (
+            SELECT * FROM events WHERE package_id = ? ORDER BY id DESC LIMIT ?
+        ) ORDER BY created_at, id
+        """,
+        (package_id, limit),
     )
-    return [view_event(row) for row in rows]
+    return [view_event(row) for row in rows], int(total)
 
 
 def _docs(db, package_id: int) -> list[dict]:
@@ -144,9 +231,12 @@ def _tasks(db) -> list[dict]:
         SELECT t.*, p.number, p.stage
         FROM tasks t
         JOIN packages p ON p.id = t.package_id
-        ORDER BY t.id
-        """
+        ORDER BY t.id DESC
+        LIMIT ?
+        """,
+        (TASK_CAP,),
     )
+    rows.sort(key=lambda row: row["id"])
     for row in rows:
         row["stage_class"] = f"st-{row['stage']}"
         row["when"] = row["due_label"]
@@ -165,22 +255,33 @@ def page_list(request: Request):
     db = request.app.state.db
     stage = request.query_params.get("stage", "")
     status = request.query_params.get("status", "")
-    rows = _rows(db)
-    counts = Counter(row["stage"] for row in rows)
-    shown = rows
-    if stage:
-        shown = [row for row in shown if row["stage"] == stage]
-    if status:
-        shown = [row for row in shown if row["status"] == status]
+    page = _page_num(request.query_params.get("page", ""))
+    offset = (page - 1) * LIST_PAGE_SIZE
+    rows, total = _rows(db, stage=stage, status=status, limit=LIST_PAGE_SIZE, offset=offset)
+    pages = max(1, (total + LIST_PAGE_SIZE - 1) // LIST_PAGE_SIZE)
+    if page > pages:
+        page = pages
+        offset = (page - 1) * LIST_PAGE_SIZE
+        rows, total = _rows(db, stage=stage, status=status, limit=LIST_PAGE_SIZE, offset=offset)
+    stats = package_stats(db)
     ctx = base_ctx(request, "list")
     ctx.update({
-        "rows": shown,
-        "all_count": len(rows),
-        "counts": counts,
-        "kpis": kpis(rows),
+        "rows": rows,
+        "all_count": stats["all_count"],
+        "counts": stats["counts"],
+        "kpis": stats["kpis"],
         "stage": stage,
         "status": status,
         "today": fmt_dt(now_iso())[:5],
+        "pager": {
+            "page": page,
+            "pages": pages,
+            "start": offset + 1 if rows else 0,
+            "stop": offset + len(rows),
+            "total": total,
+            "prev": stage_href(stage, status, page - 1) if page > 1 else "",
+            "next": stage_href(stage, status, page + 1) if page < pages else "",
+        },
     })
     return templates.TemplateResponse(request, "list.html", ctx)
 
@@ -188,7 +289,7 @@ def page_list(request: Request):
 @router.get("/kanban")
 def page_kanban(request: Request):
     db = request.app.state.db
-    rows = _rows(db)
+    rows, board_total = _rows(db, limit=KANBAN_CAP, offset=0)
     columns = []
     for column in KANBAN:
         cards = [row for row in rows if row["stage"] in column["stages"]]
@@ -208,6 +309,9 @@ def page_kanban(request: Request):
         "bucket_defs": BUCKETS,
         "packages": rows,
         "today": fmt_dt(now_iso())[:5],
+        "board_truncated": board_total > len(rows),
+        "board_total": board_total,
+        "board_cap": KANBAN_CAP,
     })
     return templates.TemplateResponse(request, "kanban.html", ctx)
 
@@ -226,12 +330,12 @@ def page_card(request: Request, key: str):
     except ApiError:
         ctx = base_ctx(request, "card")
         return templates.TemplateResponse(request, "missing.html", ctx, status_code=404)
-    events = _events(db, package["id"])
+    events, event_count = _events(db, package["id"])
     ctx = base_ctx(request, "card", current_id=package["id"])
     ctx.update({
         "p": package,
         "events": events[-8:],
-        "event_count": len(events),
+        "event_count": event_count,
         "docs": _docs(db, package["id"]),
     })
     return templates.TemplateResponse(request, "card.html", ctx)
@@ -246,7 +350,7 @@ def page_feed(request: Request, key: str):
         ctx = base_ctx(request, "feed")
         return templates.TemplateResponse(request, "missing.html", ctx, status_code=404)
     kind = request.query_params.get("kind", "all") or "all"
-    events = _events(db, package["id"])
+    events, event_total = _events(db, package["id"])
     counts = Counter(event["group"] for event in events)
     if kind == "agent":
         visible = [event for event in events if event["group"] in {"agent", "yes"}]
@@ -267,7 +371,14 @@ def page_feed(request: Request, key: str):
             count = counts.get(code, 0)
         filters.append({**item, "count": count, "on": kind == code})
     ctx = base_ctx(request, "feed", current_id=package["id"])
-    ctx.update({"p": package, "events": visible, "filters": filters, "kind": kind})
+    ctx.update({
+        "p": package,
+        "events": visible,
+        "filters": filters,
+        "kind": kind,
+        "feed_truncated": event_total > len(events),
+        "feed_cap": FEED_CAP,
+    })
     return templates.TemplateResponse(request, "feed.html", ctx)
 
 
@@ -295,7 +406,7 @@ async def advance(request: Request, key: str):
             request.app.state.db,
             request.app.state.settings,
             str(package["id"]),
-            {"stage": nxt, "actor": request.app.state.settings.display_name},
+            {"stage": nxt, "actor": actor_name(request)},
         )
     except ApiError:
         return _redirect(f"/packages/{package['id']}", "stage")
@@ -336,10 +447,18 @@ async def update_form(request: Request, key: str):
         "client_contact": _form_last(form, "client_contact"),
         "client_email": _form_last(form, "client_email"),
         "client_phone": _form_last(form, "client_phone"),
+        "client_inn": _form_last(form, "client_inn"),
+        "client_company": _form_last(form, "client_company"),
         "client_note": _form_last(form, "client_note"),
+        "carrier_phone": _form_last(form, "carrier_phone"),
+        "carrier_inn": _form_last(form, "carrier_inn"),
+        "driver_phone": _form_last(form, "driver_phone"),
+        "driver_email": _form_last(form, "driver_email"),
+        "license_no": _form_last(form, "license_no"),
+        "passport_no": _form_last(form, "passport_no"),
         "signed_client": _form_last(form, "signed_client"),
         "signed_carrier": _form_last(form, "signed_carrier"),
-        "actor": request.app.state.settings.display_name,
+        "actor": actor_name(request),
     }
     stage = _form_last(form, "stage")
     status = _form_last(form, "status")
@@ -371,7 +490,7 @@ async def note_form(request: Request, key: str):
             str(package["id"]),
             "note",
             _form_last(form, "text"),
-            request.app.state.settings.display_name,
+            actor_name(request),
             _form_last(form, "title") or "Заметка",
             {"group": "agent"},
         )
@@ -400,7 +519,7 @@ async def file_form(request: Request, key: str):
             blob,
             _form_last(form, "title"),
             _form_last(form, "note"),
-            request.app.state.settings.display_name,
+            actor_name(request),
         )
     except ApiError as exc:
         code = "csrf" if exc.message == "csrf" else "file"
@@ -437,6 +556,116 @@ async def task_bucket(request: Request, task_id: int):
         code = "csrf" if exc.message == "csrf" else "task"
         return _redirect("/kanban", code)
     return _redirect("/kanban")
+
+
+def _party_or_404(request: Request, party_id: int):
+    try:
+        with request.app.state.db.tx() as conn:
+            row = load_party(conn, party_id)
+            deals, deal_total = party_deals(conn, row)
+            messages = party_messages(conn, party_id)
+            signature = telegram_signature(conn, party_id) if row else ""
+    except ApiError:
+        return None
+    return row, deals, deal_total, messages, signature
+
+
+@router.get("/parties/{party_id}")
+def page_party(request: Request, party_id: int):
+    loaded = _party_or_404(request, party_id)
+    if loaded is None:
+        ctx = base_ctx(request, "card")
+        return templates.TemplateResponse(request, "missing.html", ctx, status_code=404)
+    row, deals, deal_total, messages, _signature = loaded
+    party = public_party(row)
+    back = request.query_params.get("from", "")
+    back_id = int(back) if back.isdigit() else None
+    ctx = base_ctx(request, "card", current_id=back_id)
+    ctx.update({
+        "party": party,
+        "kind_label": KIND_LABEL.get(party["kind"], "Карточка"),
+        "deals": deals,
+        "deal_total": deal_total,
+        "messages": messages,
+        "ms": MS_LABEL,
+        "wa_href": whatsapp_href(row["phone_key"]),
+        "messenger_note": mode_note(request.app.state.settings),
+        "back_id": back_id,
+        "tg_actor": TG_ACTOR,
+    })
+    return templates.TemplateResponse(request, "party.html", ctx)
+
+
+@router.post("/parties/{party_id}/messengers")
+async def party_recheck(request: Request, party_id: int):
+    form = await request.form()
+    back = _form_last(form, "from")
+    suffix = f"?from={back}" if back.isdigit() else ""
+    try:
+        check_csrf(request, form.get("csrf"))
+        recheck_party(request.app.state.db, request.app.state.settings, party_id)
+    except ApiError as exc:
+        code = "csrf" if exc.message == "csrf" else "party"
+        return _redirect(f"/parties/{party_id}{suffix}", code)
+    join = "&" if suffix else "?"
+    return _redirect(f"/parties/{party_id}{suffix}{join}note=checked")
+
+
+@router.get("/parties/{party_id}/write")
+def page_write(request: Request, party_id: int):
+    channel = request.query_params.get("channel", "tg")
+    if channel not in {"tg", "max"}:
+        return _redirect(f"/parties/{party_id}", "write")
+    loaded = _party_or_404(request, party_id)
+    if loaded is None:
+        ctx = base_ctx(request, "card")
+        return templates.TemplateResponse(request, "missing.html", ctx, status_code=404)
+    row, _deals, _deal_total, _messages, signature = loaded
+    back = request.query_params.get("from", "")
+    back_id = int(back) if back.isdigit() else None
+    ctx = base_ctx(request, "card", current_id=back_id)
+    ctx.update({
+        "party": public_party(row),
+        "channel": channel,
+        "signature": signature if channel == "tg" else "",
+        "tg_actor": TG_ACTOR,
+        "back_id": back_id,
+        "messenger_note": mode_note(request.app.state.settings),
+    })
+    return templates.TemplateResponse(request, "write.html", ctx)
+
+
+@router.post("/parties/{party_id}/write")
+async def party_write(request: Request, party_id: int):
+    form = await request.form()
+    channel = _form_last(form, "channel") or "tg"
+    back = _form_last(form, "from")
+    suffix = f"?from={back}" if back.isdigit() else ""
+    try:
+        check_csrf(request, form.get("csrf"))
+        saved = record_outbound(
+            request.app.state.db,
+            request.app.state.settings,
+            party_id,
+            channel,
+            _form_last(form, "text"),
+            actor_name(request),
+            _form_last(form, "confirm") == "yes",
+        )
+    except ApiError as exc:
+        if exc.message == "csrf":
+            code = "csrf"
+        elif exc.message == "confirm":
+            code = "confirm"
+        else:
+            code = "write"
+        target = f"/parties/{party_id}/write?channel={channel}"
+        if back.isdigit():
+            target += f"&from={back}"
+        return _redirect(target, code)
+    join = "&" if suffix else "?"
+    note = "local" if saved["status"] == "local" else "not_sent"
+    return _redirect(f"/parties/{party_id}{suffix}{join}note={note}")
 
 
 @router.get("/files/{file_id}")

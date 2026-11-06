@@ -49,7 +49,7 @@
           <td data-label="№ сделки"><a class="num" href="/packages/{{ p.id }}">{{ p.number }}</a></td>
           <td data-label="Маршрут">{{ p.route_label }}{% if p.list_note %}<div class="src">{{ p.list_note }}</div>{% endif %}</td>
           <td data-label="Дата">{{ p.load_day }}</td>
-          <td data-label="Грузовладелец">{{ p.client_name or "—" }}</td>
+          <td data-label="Грузовладелец">{% if p.client_party_id %}<a href="/parties/{{ p.client_party_id }}?from={{ p.id }}">{{ p.client_name or "Карточка" }}</a>{% else %}{{ p.client_name or "—" }}{% endif %}</td>
           <td data-label="Перевозчик / водитель">{{ p.who }}</td>
           <td data-label="Госномер">{{ p.plate_label }}</td>
           <td data-label="Ставка"><b>{{ p.rate_label }}</b></td>
@@ -65,5 +65,10 @@
     </table>
   </div>
   {% endif %}
+  <nav class="pager" aria-label="Страницы списка">
+    {% if pager.prev %}<a href="{{ pager.prev }}">Назад</a>{% endif %}
+    <span>Показаны {{ pager.start }}-{{ pager.stop }} из {{ pager.total }}</span>
+    {% if pager.next %}<a href="{{ pager.next }}">Дальше</a>{% endif %}
+  </nav>
 </div>
 {% endblock %}

@@ -172,6 +172,10 @@ def fetch_package(conn, key: str) -> dict:
 def _client_public(row: dict | None) -> dict | None:
     if not row:
         return None
+    if "tg_status" in row and "kind" in row:
+        from app.parties import public_party
+
+        return public_party(row)
     return {
         "id": row["id"],
         "name": row["name"],
@@ -179,10 +183,12 @@ def _client_public(row: dict | None) -> dict | None:
         "email": row["email"],
         "phone": row["phone"],
         "note": row["note"],
+        "company": row.get("company") or "",
+        "inn": row.get("inn") or "",
     }
 
 
-def _package_public(row: dict, client: dict | None) -> dict:
+def _package_public(row: dict, client: dict | None, carrier_party: dict | None = None, driver_party: dict | None = None) -> dict:
     return {
         "id": row["id"],
         "number": row["number"],
@@ -218,6 +224,8 @@ def _package_public(row: dict, client: dict | None) -> dict:
         "signed_client": bool(row["signed_client"]),
         "signed_carrier": bool(row["signed_carrier"]),
         "client": _client_public(client),
+        "carrier_party": carrier_party,
+        "driver_party": driver_party,
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }
@@ -226,13 +234,23 @@ def _package_public(row: dict, client: dict | None) -> dict:
 def _load_client(conn, client_id) -> dict | None:
     if not client_id:
         return None
-    row = conn.execute("SELECT * FROM clients WHERE id = ?", (client_id,)).fetchone()
-    return dict(row) if row else None
+    row = conn.execute(
+        "SELECT * FROM parties WHERE id = ? AND kind = 'client'",
+        (client_id,),
+    ).fetchone()
+    if row is not None:
+        return dict(row)
+    legacy = conn.execute("SELECT * FROM clients WHERE id = ?", (client_id,)).fetchone()
+    return dict(legacy) if legacy else None
 
 
 def detail(conn, key: str) -> dict:
+    from app.parties import public_by_id
+
     package = fetch_package(conn, key)
     client = _load_client(conn, package["client_id"])
+    carrier_party = public_by_id(conn, package.get("carrier_party_id"))
+    driver_party = public_by_id(conn, package.get("driver_party_id"))
     events = [dict(r) for r in conn.execute(
         "SELECT * FROM events WHERE package_id = ? ORDER BY created_at, id", (package["id"],)
     ).fetchall()]
@@ -256,7 +274,7 @@ def detail(conn, key: str) -> dict:
             "created_at": event["created_at"],
         })
     return {
-        "package": _package_public(package, client),
+        "package": _package_public(package, client, carrier_party, driver_party),
         "events": public_events,
         "documents": [
             {
@@ -271,15 +289,67 @@ def detail(conn, key: str) -> dict:
     }
 
 
-def list_packages(db: Database, status: str | None = None, stage: str | None = None) -> list[dict]:
+def _window(limit: int, offset: int) -> tuple[int, int]:
+    from app.domain import LIST_PAGE_MAX, LIST_PAGE_SIZE
+
+    try:
+        size = int(limit)
+        skip = int(offset)
+    except (TypeError, ValueError) as exc:
+        raise ApiError(422, "limit и offset должны быть целыми.") from exc
+    if size < 1:
+        size = LIST_PAGE_SIZE
+    if size > LIST_PAGE_MAX:
+        size = LIST_PAGE_MAX
+    if skip < 0:
+        skip = 0
+    if skip > 100_000:
+        skip = 100_000
+    return size, skip
+
+
+def package_stats(db: Database) -> dict:
+    row = db.one(
+        """
+        SELECT
+            COUNT(*) AS all_count,
+            COALESCE(SUM(CASE WHEN status != 'otkaz' THEN 1 ELSE 0 END), 0) AS in_work,
+            COALESCE(SUM(CASE WHEN TRIM(COALESCE(gate, '')) != '' THEN 1 ELSE 0 END), 0) AS waiting_yes,
+            COALESCE(SUM(CASE WHEN stage IN ('docs_sent', 'podpisany') THEN 1 ELSE 0 END), 0) AS waiting_sign,
+            COALESCE(SUM(CASE WHEN status != 'otkaz' THEN COALESCE(rate_rub, 0) ELSE 0 END), 0) AS rate_sum
+        FROM packages
+        """
+    )
+    counts = {item["stage"]: item["n"] for item in db.q("SELECT stage, COUNT(*) AS n FROM packages GROUP BY stage")}
+    return {
+        "all_count": int(row["all_count"] or 0),
+        "counts": counts,
+        "kpis": {
+            "in_work": int(row["in_work"] or 0),
+            "waiting_yes": int(row["waiting_yes"] or 0),
+            "waiting_sign": int(row["waiting_sign"] or 0),
+            "rate_sum": money(int(row["rate_sum"] or 0)),
+        },
+    }
+
+
+def list_packages(
+    db: Database,
+    status: str | None = None,
+    stage: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> dict:
     if status and status not in {s["code"] for s in STATUSES}:
         raise ApiError(422, "Неизвестный статус.")
-    if stage and stage not in STAGE_STATUS:
+    if stage and stage not in STAGE_STATUS and stage != "otkaz":
         raise ApiError(422, "Неизвестная стадия.")
+    size, skip = _window(limit, offset)
     sql = """
-        SELECT p.*, c.name AS client_name
+        SELECT p.*, COALESCE(c.name, cl.name, '') AS client_name
         FROM packages p
-        LEFT JOIN clients c ON c.id = p.client_id
+        LEFT JOIN parties c ON c.id = p.client_id AND c.kind = 'client'
+        LEFT JOIN clients cl ON cl.id = p.client_id
         WHERE 1 = 1
     """
     args: list = []
@@ -289,47 +359,16 @@ def list_packages(db: Database, status: str | None = None, stage: str | None = N
     if stage:
         sql += " AND p.stage = ?"
         args.append(stage)
-    sql += " ORDER BY p.updated_at DESC, p.id DESC"
-    rows = db.q(sql, tuple(args))
+    total = db.one(f"SELECT COUNT(*) AS n FROM ({sql}) AS q", tuple(args))["n"]
+    sql += " ORDER BY p.updated_at DESC, p.id DESC LIMIT ? OFFSET ?"
+    rows = db.q(sql, tuple(args) + (size, skip))
     out = []
     for row in rows:
         client = {"id": row["client_id"], "name": row.get("client_name") or "", "contact_name": "", "email": "", "phone": "", "note": ""} if row["client_id"] else None
         item = _package_public(row, client)
         item["client_name"] = row.get("client_name") or ""
         out.append(item)
-    return out
-
-
-def _upsert_client(conn, name: str, email: str, contact: str, phone: str, note: str, moment: str) -> int | None:
-    name = clean(name, 300)
-    email = clean(email, 200)
-    if not name and email:
-        name = email
-    if not name:
-        return None
-    row = conn.execute("SELECT * FROM clients WHERE name = ? COLLATE NOCASE ORDER BY id LIMIT 1", (name,)).fetchone()
-    if row is None:
-        cur = conn.execute(
-            """INSERT INTO clients (name, contact_name, email, phone, note, created_at)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (name, clean(contact, 200), email, clean(phone, 80), clean(note, 2000), moment),
-        )
-        return int(cur.lastrowid)
-    updates = []
-    values = []
-    for column, value in (
-        ("contact_name", clean(contact, 200)),
-        ("email", email),
-        ("phone", clean(phone, 80)),
-        ("note", clean(note, 2000)),
-    ):
-        if value and not row[column]:
-            updates.append(f"{column} = ?")
-            values.append(value)
-    if updates:
-        values.append(row["id"])
-        conn.execute(f"UPDATE clients SET {', '.join(updates)} WHERE id = ?", values)
-    return int(row["id"])
+    return {"packages": out, "total": int(total), "limit": size, "offset": skip}
 
 
 def _save_bytes(db: Database, original: str, blob: bytes) -> str:
@@ -397,7 +436,19 @@ def create_inbound(db: Database, settings: Settings, payload: dict) -> dict:
         raise ApiError(422, "attachments должен быть списком.")
     if len(attachments) > MAX_ATTACHMENTS:
         raise ApiError(422, "Слишком много вложений.")
-    if not any([sender, subject, text, client_hint, attachments]):
+    identity = any(
+        payload.get(key)
+        for key in (
+            "client_name",
+            "client_phone",
+            "client_email",
+            "client_inn",
+            "carrier_name",
+            "driver_name",
+            "driver_phone",
+        )
+    )
+    if not any([sender, subject, text, client_hint, attachments, identity]):
         raise ApiError(422, "Пустой пакет.")
     from_name, from_email = parse_from(sender)
     moment = now_iso()
@@ -412,6 +463,8 @@ def create_inbound(db: Database, settings: Settings, payload: dict) -> dict:
                     "SELECT * FROM packages WHERE thread_id = ?", (thread_id,)
                 ).fetchone()
                 existing = dict(row) if row else None
+            from app.parties import sync_package_parties
+
             if existing:
                 created = False
                 package_id = existing["id"]
@@ -426,10 +479,17 @@ def create_inbound(db: Database, settings: Settings, payload: dict) -> dict:
                         fill[key] = value
                 if payload.get("rate_rub") not in (None, "") and existing["rate_rub"] is None:
                     fill["rate_rub"] = opt_int(payload.get("rate_rub"), "rate_rub")
-                if not existing["client_id"] and (client_hint or from_name or from_email):
-                    fill["client_id"] = _upsert_client(
-                        conn, client_hint or from_name, from_email, from_name if client_hint else "", "", "", moment
-                    )
+                fill.update(sync_package_parties(
+                    conn,
+                    settings,
+                    existing,
+                    payload,
+                    moment,
+                    mode="inbound",
+                    from_name=from_name,
+                    from_email=from_email,
+                    client_hint=client_hint,
+                ))
                 if fill:
                     sets = ", ".join(f"{k} = ?" for k in fill)
                     conn.execute(
@@ -438,14 +498,16 @@ def create_inbound(db: Database, settings: Settings, payload: dict) -> dict:
                     )
             else:
                 seq, number = allocate_number(conn, year)
-                client_id = _upsert_client(
+                linked = sync_package_parties(
                     conn,
-                    client_hint or from_name,
-                    from_email,
-                    from_name if client_hint else "",
-                    "",
-                    "",
+                    settings,
+                    None,
+                    payload,
                     moment,
+                    mode="inbound",
+                    from_name=from_name,
+                    from_email=from_email,
+                    client_hint=client_hint,
                 )
                 status = "polucheno"
                 stage = "nahodka"
@@ -453,15 +515,17 @@ def create_inbound(db: Database, settings: Settings, payload: dict) -> dict:
                     """INSERT INTO packages (
                         number, year, seq, status, stage, client_id, route_from, route_to, cargo, weight, pallets,
                         rate_rub, load_date, source, source_detail, list_note, subject, thread_id, stage_times_json,
+                        carrier_name, carrier_email, carrier_contract, carrier_party_id,
+                        driver_name, driver_channel, plate, vehicle, driver_party_id,
                         created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         number,
                         year,
                         seq,
                         status,
                         stage,
-                        client_id,
+                        linked.get("client_id"),
                         clean(payload.get("route_from"), 120),
                         clean(payload.get("route_to"), 120),
                         clean(payload.get("cargo"), 300),
@@ -475,6 +539,15 @@ def create_inbound(db: Database, settings: Settings, payload: dict) -> dict:
                         subject,
                         thread_id,
                         touch_stage("{}", stage, moment),
+                        linked.get("carrier_name", ""),
+                        linked.get("carrier_email", ""),
+                        linked.get("carrier_contract", ""),
+                        linked.get("carrier_party_id"),
+                        linked.get("driver_name", ""),
+                        linked.get("driver_channel", ""),
+                        linked.get("plate", ""),
+                        linked.get("vehicle", ""),
+                        linked.get("driver_party_id"),
                         moment,
                         moment,
                     ),
@@ -584,44 +657,9 @@ def apply_patch(db: Database, settings: Settings, key: str, payload: dict) -> di
             updates["stage"] = new_stage
             updates["status"] = new_status
             updates["stage_times_json"] = touch_stage(package["stage_times_json"], new_stage, moment)
-        client_fields = {
-            "name": clean(payload.get("client_name"), 300) if "client_name" in payload else None,
-            "contact": clean(payload.get("client_contact"), 200) if "client_contact" in payload else None,
-            "email": clean(payload.get("client_email"), 200) if "client_email" in payload else None,
-            "phone": clean(payload.get("client_phone"), 80) if "client_phone" in payload else None,
-            "note": clean(payload.get("client_note"), 2000) if "client_note" in payload else None,
-        }
-        if any(v is not None for v in client_fields.values()):
-            client = _load_client(conn, package["client_id"])
-            if client is None:
-                cid = _upsert_client(
-                    conn,
-                    client_fields["name"] or "",
-                    client_fields["email"] or "",
-                    client_fields["contact"] or "",
-                    client_fields["phone"] or "",
-                    client_fields["note"] or "",
-                    moment,
-                )
-                if cid:
-                    updates["client_id"] = cid
-            else:
-                sets = []
-                vals = []
-                mapping = {
-                    "name": "name",
-                    "contact": "contact_name",
-                    "email": "email",
-                    "phone": "phone",
-                    "note": "note",
-                }
-                for src, column in mapping.items():
-                    if client_fields[src] is not None:
-                        sets.append(f"{column} = ?")
-                        vals.append(client_fields[src])
-                if sets:
-                    vals.append(client["id"])
-                    conn.execute(f"UPDATE clients SET {', '.join(sets)} WHERE id = ?", vals)
+        from app.parties import sync_package_parties
+
+        updates.update(sync_package_parties(conn, settings, package, payload, moment, mode="patch"))
         if updates:
             sets = ", ".join(f"{k} = ?" for k in updates)
             conn.execute(

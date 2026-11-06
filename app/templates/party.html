@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}ATI Delivery · CRM — {{ kind_label }} {{ party.name }}{% endblock %}
+{% block body %}
+<div class="card split">
+  <div>
+    <div class="mut">
+      {% if back_id %}<a href="/packages/{{ back_id }}">← Сделка</a>{% else %}<a href="/">← Список сделок</a>{% endif %}
+    </div>
+    <h1>Карточка {{ kind_label|lower }}</h1>
+    <p class="src">Поля обновляет заявка и форма сделки. Почта из CRM не уходит.</p>
+  </div>
+</div>
+<div class="grid">
+  <div class="card">
+    <h2>{{ party.name or "Без названия" }}</h2>
+    <dl class="profile">
+      <dt>ФИО / название</dt><dd>{{ party.name or "—" }}</dd>
+      <dt>Контакт</dt><dd>{{ party.contact_name or "—" }}</dd>
+      <dt>Компания</dt><dd>{{ party.company or "—" }}</dd>
+      <dt>Телефон</dt><dd>{{ party.phone or "—" }}</dd>
+      <dt>Почта</dt><dd>{{ party.email or "—" }}</dd>
+      <dt>ИНН</dt><dd>{{ party.inn or "—" }}</dd>
+      {% if party.kind == 'carrier' %}
+      <dt>Договор</dt><dd>{{ party.contract or "—" }}</dd>
+      {% endif %}
+      {% if party.kind == 'driver' or party.vehicle or party.plate or party.license_no or party.passport_no %}
+      <dt>Авто</dt><dd>{{ party.vehicle or "—" }}</dd>
+      <dt>Госномер</dt><dd>{{ party.plate or "—" }}</dd>
+      <dt>Водительское удостоверение</dt><dd>{{ party.license_no or "—" }}</dd>
+      <dt>Паспорт</dt><dd>{{ party.passport_no or "—" }}</dd>
+      <dt>Канал</dt><dd>{{ party.channel or "—" }}</dd>
+      {% endif %}
+      {% if party.note %}<dt>Заметка</dt><dd>{{ party.note }}</dd>{% endif %}
+    </dl>
+  </div>
+  <div class="card">
+    <h2>Мессенджеры</h2>
+    <p class="mut">{{ messenger_note }}</p>
+    <div class="ms">
+      <span class="badge {{ party.tg_status }}">Telegram: {{ ms[party.tg_status] }}</span>
+      <a class="btn small" href="/parties/{{ party.id }}/write?channel=tg{% if back_id %}&amp;from={{ back_id }}{% endif %}">Написать</a>
+    </div>
+    <div class="ms">
+      <span class="badge {{ party.wa_status }}">WhatsApp: {{ ms[party.wa_status] }}</span>
+      {% if wa_href %}
+      <a class="btn small" href="{{ wa_href }}" rel="noopener noreferrer">Написать</a>
+      {% else %}
+      <span class="btn small ghost">Нет телефона</span>
+      {% endif %}
+    </div>
+    <p class="mut">WhatsApp открывается у вас. CRM сообщение не отправляет.</p>
+    <div class="ms">
+      <span class="badge {{ party.max_status }}">MAX: {{ ms[party.max_status] }}</span>
+      <a class="btn small" href="/parties/{{ party.id }}/write?channel=max{% if back_id %}&amp;from={{ back_id }}{% endif %}">Написать</a>
+    </div>
+    <form method="post" action="/parties/{{ party.id }}/messengers">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      {% if back_id %}<input type="hidden" name="from" value="{{ back_id }}">{% endif %}
+      <button class="btn ghost" type="submit">Проверить снова</button>
+    </form>
+    <p class="src">Кнопка «Написать» сама ничего не шлёт. Telegram — только после подтверждения на следующем экране, от имени «{{ tg_actor }}».</p>
+  </div>
+</div>
+<div class="card">
+  <h2>Сделки</h2>
+  {% if not deals %}<p class="mut">Сделок с этой карточкой пока нет.</p>{% endif %}
+  {% if deal_total > deals|length %}<p class="mut">Показаны {{ deals|length }} последних из {{ deal_total }}.</p>{% endif %}
+  <ul class="deals">
+    {% for deal in deals %}
+    <li>
+      <a class="num" href="/packages/{{ deal.id }}">{{ deal.number }}</a>
+      {{ deal.route_label }}
+      <span class="chip {{ deal.stage_class }}">{{ deal.stage_label }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+{% if messages %}
+<div class="card">
+  <h2>Исходящие из CRM</h2>
+  {% for message in messages %}
+  <div class="msg">
+    <b>{{ message.actor or message.channel }}</b>
+    <span class="mut">{{ message.created_at }} · {{ message.status }} · {{ message.operator }}</span>
+    <div>{{ message.body }}</div>
+    <div class="src">{{ message.detail }}</div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+{% endblock %}

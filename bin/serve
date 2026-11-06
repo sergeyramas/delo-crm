@@ -39,6 +39,9 @@ def main() -> None:
     if not 1 <= port <= 65535:
         sys.stderr.write("PORT вне диапазона.\n")
         sys.exit(2)
+    # Ядро ~1.8G. Один процесс, без воркеров и без reload: лишний процесс сюда не кладём.
+    concurrency = _cap("LIMIT_CONCURRENCY", 20, 40)
+    backlog = _cap("BACKLOG", 16, 64)
     import uvicorn
 
     from app.main import create_app
@@ -47,10 +50,27 @@ def main() -> None:
         create_app(),
         host=host,
         port=port,
+        workers=1,
+        limit_concurrency=concurrency,
+        backlog=backlog,
+        timeout_keep_alive=5,
         proxy_headers=True,
         forwarded_allow_ips="127.0.0.1",
         log_level="info",
     )
+
+
+def _cap(name: str, default: int, ceiling: int) -> int:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    if value < 1:
+        return default
+    return min(value, ceiling)
 
 
 if __name__ == "__main__":

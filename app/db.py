@@ -61,6 +61,8 @@ CREATE TABLE IF NOT EXISTS packages (
     signed_client INTEGER NOT NULL DEFAULT 0,
     signed_carrier INTEGER NOT NULL DEFAULT 0,
     stage_times_json TEXT NOT NULL DEFAULT '{}',
+    carrier_party_id INTEGER,
+    driver_party_id INTEGER,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     UNIQUE(year, seq)
@@ -117,6 +119,70 @@ CREATE INDEX IF NOT EXISTS idx_packages_stage ON packages(stage);
 CREATE INDEX IF NOT EXISTS idx_events_pkg ON events(package_id, id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_packages_thread
     ON packages(thread_id) WHERE thread_id <> '';
+
+CREATE TABLE IF NOT EXISTS parties (
+    id INTEGER PRIMARY KEY,
+    kind TEXT NOT NULL,
+    name TEXT NOT NULL DEFAULT '',
+    contact_name TEXT NOT NULL DEFAULT '',
+    company TEXT NOT NULL DEFAULT '',
+    phone TEXT NOT NULL DEFAULT '',
+    phone_key TEXT NOT NULL DEFAULT '',
+    email TEXT NOT NULL DEFAULT '',
+    email_key TEXT NOT NULL DEFAULT '',
+    inn TEXT NOT NULL DEFAULT '',
+    inn_key TEXT NOT NULL DEFAULT '',
+    note TEXT NOT NULL DEFAULT '',
+    vehicle TEXT NOT NULL DEFAULT '',
+    plate TEXT NOT NULL DEFAULT '',
+    license_no TEXT NOT NULL DEFAULT '',
+    passport_no TEXT NOT NULL DEFAULT '',
+    channel TEXT NOT NULL DEFAULT '',
+    contract TEXT NOT NULL DEFAULT '',
+    tg_status TEXT NOT NULL DEFAULT 'unknown',
+    wa_status TEXT NOT NULL DEFAULT 'unknown',
+    max_status TEXT NOT NULL DEFAULT 'unknown',
+    messengers_checked_at TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS roles (
+    code TEXT PRIMARY KEY,
+    label TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY,
+    login TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    display_name TEXT NOT NULL,
+    role_code TEXT NOT NULL REFERENCES roles(code),
+    password_hash TEXT NOT NULL DEFAULT '',
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS outbound_messages (
+    id INTEGER PRIMARY KEY,
+    party_id INTEGER NOT NULL REFERENCES parties(id),
+    channel TEXT NOT NULL,
+    body TEXT NOT NULL,
+    signature TEXT NOT NULL DEFAULT '',
+    actor TEXT NOT NULL DEFAULT '',
+    operator TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL,
+    detail TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+
+INSERT OR IGNORE INTO roles (code, label) VALUES
+    ('dispatcher', 'Диспетчер'),
+    ('operator', 'Оператор');
+
+CREATE INDEX IF NOT EXISTS idx_parties_kind_inn ON parties(kind, inn_key);
+CREATE INDEX IF NOT EXISTS idx_parties_kind_phone ON parties(kind, phone_key);
+CREATE INDEX IF NOT EXISTS idx_parties_kind_email ON parties(kind, email_key);
+CREATE INDEX IF NOT EXISTS idx_outbound_party ON outbound_messages(party_id, id);
 """
 
 
@@ -136,6 +202,14 @@ class Database:
     def init(self) -> None:
         with self.lock:
             self.conn.executescript(SCHEMA)
+            self._migrate()
+
+    def _migrate(self) -> None:
+        cols = {row["name"] for row in self.conn.execute("PRAGMA table_info(packages)")}
+        if "carrier_party_id" not in cols:
+            self.conn.execute("ALTER TABLE packages ADD COLUMN carrier_party_id INTEGER")
+        if "driver_party_id" not in cols:
+            self.conn.execute("ALTER TABLE packages ADD COLUMN driver_party_id INTEGER")
 
     def q(self, sql: str, args: tuple = ()) -> list[dict]:
         with self.lock:

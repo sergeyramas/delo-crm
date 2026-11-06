@@ -17,6 +17,7 @@
   </div>
 </div>
 <div class="card">
+  {% if feed_truncated %}<p class="mut">Показаны последние {{ feed_cap }} событий этой сделки.</p>{% endif %}
   {% for event in events %}
   <article class="msg {{ event.css }}">
     <b>{{ event.heading }}</b>

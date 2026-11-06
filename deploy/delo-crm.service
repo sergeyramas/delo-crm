@@ -1,6 +1,9 @@
 # /etc/systemd/system/delo-crm.service
 # Порт по умолчанию 8091. Если в env другой PORT, поправьте и nginx.
 # Секреты только в EnvironmentFile, не в этом юните.
+# systemd читает файлы от root до User=delo, поэтому mode 600 в /root подходит.
+# Минус перед путём: нет файла — юнит всё равно стартует.
+# /srv/ati/secrets/delo-crm.env — старый путь, если файл уже лежит там.
 
 [Unit]
 Description=ATI Delo CRM
@@ -11,12 +14,17 @@ Type=simple
 User=delo
 Group=delo
 WorkingDirectory=/opt/delo-crm
-EnvironmentFile=/srv/ati/secrets/delo-crm.env
+EnvironmentFile=-/srv/ati/secrets/delo-crm.env
+EnvironmentFile=-/root/ati/secrets/delo-crm.env
+EnvironmentFile=-/root/ati/secrets/delo-crm-auth.env
 ExecStart=/opt/delo-crm/.venv/bin/python bin/serve
 Restart=on-failure
 RestartSec=2
 NoNewPrivileges=true
 PrivateTmp=true
+# На Ядре около 1.8G на всё. CRM держим в 512M, чтобы nginx и ssh остались живы.
+MemoryHigh=384M
+MemoryMax=512M
 
 [Install]
 WantedBy=multi-user.target

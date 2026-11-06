@@ -5,6 +5,9 @@
   <h2>Воронка сделок · {{ today }}</h2>
   <span class="mut">от находки до оплаты · номера Д-ГГГГ-NNNN</span>
 </div>
+{% if board_truncated %}
+<p class="banner">На доске последние {{ board_cap }} обновлённых сделок из {{ board_total }}. Остальные — в списке, постранично.</p>
+{% endif %}
 <div class="kb">
   {% for col in columns %}
   <section class="col" aria-labelledby="col-{{ col.code }}">

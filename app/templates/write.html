@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}ATI Delivery · CRM — написать {{ party.name }}{% endblock %}
+{% block body %}
+<div class="card">
+  <div class="mut"><a href="/parties/{{ party.id }}{% if back_id %}?from={{ back_id }}{% endif %}">← Карточка</a></div>
+  {% if channel == 'tg' %}
+  <h1>Написать в Telegram</h1>
+  <p>Получатель: <b>{{ party.name or party.phone or "—" }}</b>{% if party.phone %} · {{ party.phone }}{% endif %}</p>
+  <p>От имени: <b>{{ tg_actor }}</b></p>
+  <p class="gate">Подпись, которую CRM добавит к тексту: {{ signature }}</p>
+  <p class="mut">Первое сообщение в диалоге начинается с «Привет, это ИИ-ассистент Сергея.» Следующие — с «ИИ-ассистент Сергея на связи.»</p>
+  {% else %}
+  <h1>Черновик в MAX</h1>
+  <p>Получатель: <b>{{ party.name or party.phone or "—" }}</b></p>
+  <p class="gate">Боевой MAX не подключён. После подтверждения черновик останется в CRM и никуда не уйдёт.</p>
+  {% endif %}
+  <p class="mut">{{ messenger_note }}</p>
+  <form method="post" action="/parties/{{ party.id }}/write">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="channel" value="{{ channel }}">
+    {% if back_id %}<input type="hidden" name="from" value="{{ back_id }}">{% endif %}
+    <div class="field">
+      <label for="text">Текст</label>
+      <textarea id="text" name="text" required maxlength="4000"></textarea>
+    </div>
+    <div class="check">
+      <input id="confirm" type="checkbox" name="confirm" value="yes" required>
+      <label for="confirm">{% if channel == 'tg' %}Подтверждаю отправку{% else %}Подтверждаю запись черновика{% endif %}</label>
+    </div>
+    <p><button class="btn" type="submit">{% if channel == 'tg' %}Отправить{% else %}Сохранить черновик{% endif %}</button></p>
+    <p class="mut">Без этой кнопки запись не создаётся. Сервер сам мессенджер не открывает.</p>
+  </form>
+</div>
+{% endblock %}

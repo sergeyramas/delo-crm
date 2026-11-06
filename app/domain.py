@@ -80,6 +80,14 @@ BUCKETS = [
     {"code": "done", "label": "Готово", "class": "st-dostavlen"},
 ]
 
+# Ядро ~1.8G. Списки не читаем целиком: страница списка и ответ API короткие.
+LIST_PAGE_SIZE = 50
+LIST_PAGE_MAX = 100
+KANBAN_CAP = 80
+FEED_CAP = 200
+TASK_CAP = 200
+PARTY_DEAL_CAP = 50
+
 EVENT_TYPES = ("mail_in", "mail_out", "tg", "status", "note", "file")
 
 DOC_CLASS = {

@@ -72,9 +72,30 @@
   <div>
     <div class="card">
       <h2>Стороны</h2>
-      <div class="doc"><div><div class="mut">Грузовладелец / клиент</div><b>{{ p.client_name or "—" }}</b><div class="mut">{{ p.client_contact or "—" }}{% if p.client_email %} · {{ p.client_email }}{% endif %}</div></div></div>
-      <div class="doc"><div><div class="mut">Перевозчик</div><b>{{ p.carrier_name or "—" }}</b><div class="mut">{{ p.carrier_email or "—" }}{% if p.carrier_contract %} · {{ p.carrier_contract }}{% endif %}</div></div></div>
-      <div class="doc"><div><div class="mut">Водитель / машина</div><b>{{ p.driver_name or "—" }}</b><div class="mut">{{ p.driver_channel or "—" }}{% if p.plate %} · {{ p.plate }}{% endif %}{% if p.vehicle %} · {{ p.vehicle }}{% endif %}</div></div></div>
+      <div class="doc">
+        <div>
+          <div class="mut">Грузовладелец / клиент</div>
+          <b>{% if p.client_party_id %}<a href="/parties/{{ p.client_party_id }}?from={{ p.id }}">{{ p.client_name or "Карточка заказчика" }}</a>{% else %}{{ p.client_name or "—" }}{% endif %}</b>
+          <div class="mut">{{ p.client_contact or "—" }}{% if p.client_email %} · {{ p.client_email }}{% endif %}{% if p.client_phone %} · {{ p.client_phone }}{% endif %}</div>
+          {% if p.client_party_id %}<div class="src"><a href="/parties/{{ p.client_party_id }}?from={{ p.id }}">Карточка заказчика</a></div>{% endif %}
+        </div>
+      </div>
+      <div class="doc">
+        <div>
+          <div class="mut">Перевозчик</div>
+          <b>{% if p.carrier_party_id %}<a href="/parties/{{ p.carrier_party_id }}?from={{ p.id }}">{{ p.carrier_name or "Карточка перевозчика" }}</a>{% else %}{{ p.carrier_name or "—" }}{% endif %}</b>
+          <div class="mut">{{ p.carrier_email or "—" }}{% if p.carrier_contract %} · {{ p.carrier_contract }}{% endif %}{% if p.carrier_phone %} · {{ p.carrier_phone }}{% endif %}</div>
+          {% if p.carrier_party_id %}<div class="src"><a href="/parties/{{ p.carrier_party_id }}?from={{ p.id }}">Карточка перевозчика</a></div>{% endif %}
+        </div>
+      </div>
+      <div class="doc">
+        <div>
+          <div class="mut">Водитель / машина</div>
+          <b>{% if p.driver_party_id %}<a href="/parties/{{ p.driver_party_id }}?from={{ p.id }}">{{ p.driver_name or "Карточка водителя" }}</a>{% else %}{{ p.driver_name or "—" }}{% endif %}</b>
+          <div class="mut">{{ p.driver_channel or "—" }}{% if p.plate %} · {{ p.plate }}{% endif %}{% if p.vehicle %} · {{ p.vehicle }}{% endif %}{% if p.driver_phone %} · {{ p.driver_phone }}{% endif %}</div>
+          {% if p.driver_party_id %}<div class="src"><a href="/parties/{{ p.driver_party_id }}?from={{ p.id }}">Карточка водителя</a></div>{% endif %}
+        </div>
+      </div>
     </div>
     <div class="card warn">
       <h2>Флаги и точки «да»</h2>
@@ -111,15 +132,23 @@
         <div class="field"><label for="client_name">Клиент</label><input id="client_name" name="client_name" type="text" value="{{ p.client_name }}" maxlength="300" autocomplete="organization"></div>
         <div class="field"><label for="client_contact">Контакт клиента</label><input id="client_contact" name="client_contact" type="text" value="{{ p.client_contact or '' }}" maxlength="200" autocomplete="name"></div>
         <div class="field"><label for="client_email">Email клиента</label><input id="client_email" name="client_email" type="email" value="{{ p.client_email or '' }}" maxlength="200" autocomplete="email" autocapitalize="off" spellcheck="false"></div>
-        <div class="field"><label for="client_phone">Телефон клиента</label><input id="client_phone" name="client_phone" type="text" value="{{ p.client_phone or '' }}" maxlength="80" autocomplete="tel"></div>
+        <div class="field"><label for="client_phone">Телефон клиента</label><input id="client_phone" name="client_phone" type="tel" value="{{ p.client_phone or '' }}" maxlength="80" autocomplete="tel"></div>
+        <div class="field"><label for="client_inn">ИНН клиента</label><input id="client_inn" name="client_inn" type="text" inputmode="numeric" value="{{ p.client_inn or '' }}" maxlength="20" autocomplete="off"></div>
+        <div class="field"><label for="client_company">Компания клиента</label><input id="client_company" name="client_company" type="text" value="{{ p.client_company or '' }}" maxlength="300" autocomplete="organization"></div>
         <div class="field wide"><label for="client_note">Заметка по клиенту</label><input id="client_note" name="client_note" type="text" value="{{ p.client_note or '' }}" maxlength="2000"></div>
         <div class="field"><label for="carrier_name">Перевозчик</label><input id="carrier_name" name="carrier_name" type="text" value="{{ p.carrier_name }}" maxlength="200"></div>
         <div class="field"><label for="carrier_email">Email перевозчика</label><input id="carrier_email" name="carrier_email" type="email" value="{{ p.carrier_email }}" maxlength="200" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
+        <div class="field"><label for="carrier_phone">Телефон перевозчика</label><input id="carrier_phone" name="carrier_phone" type="tel" value="{{ p.carrier_phone or '' }}" maxlength="80" autocomplete="tel"></div>
+        <div class="field"><label for="carrier_inn">ИНН перевозчика</label><input id="carrier_inn" name="carrier_inn" type="text" inputmode="numeric" value="{{ p.carrier_inn or '' }}" maxlength="20" autocomplete="off"></div>
         <div class="field"><label for="carrier_contract">Договор</label><input id="carrier_contract" name="carrier_contract" type="text" value="{{ p.carrier_contract }}" maxlength="120"></div>
-        <div class="field"><label for="driver_name">Водитель</label><input id="driver_name" name="driver_name" type="text" value="{{ p.driver_name }}" maxlength="120"></div>
+        <div class="field"><label for="driver_name">Водитель</label><input id="driver_name" name="driver_name" type="text" value="{{ p.driver_name }}" maxlength="120" autocomplete="name"></div>
+        <div class="field"><label for="driver_phone">Телефон водителя</label><input id="driver_phone" name="driver_phone" type="tel" value="{{ p.driver_phone or '' }}" maxlength="80" autocomplete="tel"></div>
+        <div class="field"><label for="driver_email">Email водителя</label><input id="driver_email" name="driver_email" type="email" value="{{ p.driver_email or '' }}" maxlength="200" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
         <div class="field"><label for="driver_channel">Канал водителя</label><input id="driver_channel" name="driver_channel" type="text" value="{{ p.driver_channel }}" maxlength="120"></div>
         <div class="field"><label for="plate">Госномер</label><input id="plate" name="plate" type="text" value="{{ p.plate }}" maxlength="40" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
         <div class="field"><label for="vehicle">Машина</label><input id="vehicle" name="vehicle" type="text" value="{{ p.vehicle }}" maxlength="80"></div>
+        <div class="field"><label for="license_no">Водительское удостоверение</label><input id="license_no" name="license_no" type="text" value="{{ p.license_no or '' }}" maxlength="40" autocomplete="off"></div>
+        <div class="field"><label for="passport_no">Паспорт водителя</label><input id="passport_no" name="passport_no" type="text" value="{{ p.passport_no or '' }}" maxlength="40" autocomplete="off"></div>
       </div>
     </fieldset>
     <fieldset>

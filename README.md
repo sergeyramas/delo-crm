@@ -6,7 +6,27 @@
 
 ## Порт для Вишну
 
-**8091** на **127.0.0.1**. В юните и в nginx стоит один и тот же порт. Если порт занят, поменяйте `PORT` и `proxy_pass` вместе и не публикуйте его в firewall.
+**8091** на **127.0.0.1**. Снаружи только nginx, URL `https://crm.77-91-113-64.sslip.io`. Если порт занят, поменяйте `PORT` в env и `server 127.0.0.1:8091` в nginx вместе. В firewall порт не открывать.
+
+## Память
+
+На Ядре около **1.8G** на всю машину. CRM — один процесс Python, без воркеров, без фоновой выгрузки сообщений и без своего кэша в памяти.
+
+| | Значение |
+|---|---|
+| Процессы | `workers=1` в `bin/serve`. Второго воркера нет и переменной, которая его включит, тоже нет |
+| Запросы сразу | `LIMIT_CONCURRENCY=20` (потолок в коде 40) |
+| Очередь сокета | `BACKLOG=16` (потолок 64) |
+| Keep-alive | 5 секунд |
+| nginx → приложение | `keepalive 4` |
+| Память юнита | `MemoryHigh=384M`, `MemoryMax=512M` |
+| Список | 50 сделок на страницу, API не больше 100 за запрос |
+| Доска | последние 80 обновлённых сделок |
+| Лента сделки | последние 200 событий |
+
+SQLite одна, соединение одно. Redis, Celery и пул процессов не ставим.
+
+Токен MAX и HTTPS-выгрузка сообщений в этот PR не входят. Кнопка MAX только сохраняет черновик в CRM.
 
 ## Две оси карточки
 
@@ -89,9 +109,44 @@ curl -sS -H "Content-Type: application/json" \
 Один из двух способов, не оба сразу, чтобы не было двойного пароля.
 
 1. **nginx basic** (так в примере конфига). `AUTH_MODE=proxy`, `UI_GATE_SECRET` пустой. Приложение слушает только loopback, пароль спрашивает nginx (`htpasswd`). С машины на `127.0.0.1:8091` UI открыт тем, у кого есть shell.
-2. **Пароль приложения.** `AUTH_MODE=basic`, `UI_USER` и `UI_PASSWORD` в env. Nginx без `auth_basic`. Заголовок `WWW-Authenticate`. `/health` и `/s/*` пароль экрана не спрашивают: шлюз закрыт своим секретом.
+2. **Пароль приложения.** `AUTH_MODE=basic`. Nginx без `auth_basic`. Заголовок `WWW-Authenticate`. `/health` и `/s/*` пароль экрана не спрашивают: шлюз закрыт своим секретом.
 
-Локально `AUTH_MODE=off`.
+Учётки экрана — Сергей (роль `dispatcher`, в шапке «Диспетчер») и Андрей (роль `operator`, «Оператор»). Роли лежат в таблице `roles`. Отдельного ACL по экранам нет: оба видят одни и те же сделки. Это задел, не матрица прав.
+
+Пароли только в `/root/ati/secrets/delo-crm-auth.env`. Пустое значение не стирает уже записанный хэш и не пускает в новую базу. В репозитории паролей нет, процесс их не печатает.
+
+Локально `AUTH_MODE=off` (шапка «Андрей (логист)» без входа) или `basic` с паролями в своём `.env`, который не коммитится.
+
+Старый одиночный вход `UI_USER` / `UI_PASSWORD` ещё работает, если у этой учётки нет хэша из `DELO_USER_*_PASSWORD`.
+
+## Карточки контрагентов
+
+Из сделки открываются три карточки: заказчик, перевозчик, водитель. На карточке — название или ФИО, контакт, компания, телефон, почта, ИНН, для перевозчика договор, для водителя авто, госномер, водительское удостоверение и паспорт (если поля пришли). Ниже список сделок этого контрагента.
+
+Заявка (`POST /s/inbound/doc` и `PATCH`) сразу создаёт или обновляет карточку. Пустое поле заявки уже заполненное не затирает. Форма сделки пишет то, что в ней введено.
+
+Ключ внутри одного типа (заказчик отдельно от водителя), сверху вниз:
+
+| Что пришло | С какой карточкой склеиваем |
+|---|---|
+| ИНН, 10 или 12 цифр | с тем же ИНН |
+| иначе телефон | с тем же телефоном |
+| иначе почта | с той же почтой |
+| иначе только имя | с тем же именем |
+
+Телефон: только цифры, `8XXXXXXXXXX` приводится к `7XXXXXXXXXX`, короче 10 цифр ключом не считается. Один номер у заказчика и у водителя — две карточки. Если номер уже записан на другую карточку того же типа, он туда не переносится (ИНН важнее).
+
+Поля заявки: `client_name`, `client_contact`, `client_phone`, `client_email`, `client_inn`, `client_company`, `carrier_name`, `carrier_phone`, `carrier_email`, `carrier_inn`, `carrier_contract`, `driver_name`, `driver_phone`, `driver_email`, `vehicle`, `plate`, `license_no` (или `driver_license`), `passport_no` (или `driver_passport`). Плюс прежние `client_hint` и `from`.
+
+## Мессенджеры
+
+По телефону карточка ставит отметку Telegram, WhatsApp, MAX: «есть», «нет» или «неизвестно». Кнопка «Написать» сама ничего не отправляет.
+
+- Telegram: экран черновика и галочка подтверждения. Подпись первого исходящего в этом диалоге — «Привет, это ИИ-ассистент Сергея.», дальше — «ИИ-ассистент Сергея на связи.». От имени «Ассистент Андрея». Кто нажал, пишется отдельно.
+- WhatsApp: ссылка `wa.me`. Сообщение набирает человек у себя.
+- MAX: черновик остаётся в CRM. Боевой отправки нет.
+
+`MESSENGER_CHECK=off` (так и должно стоять на Ядре) — бейджи «неизвестно», сеть не вызывается. `mock` — учебная заглушка из последней цифры телефона, тоже без сети. `live` не ходит в сеть и ничего не выгружает: боевой адаптер, токен MAX и приём сообщений по HTTPS в этот выпуск не входят. Токены, если когда-нибудь появятся, только в env на сервере (`MESSENGER_TG_TOKEN`, `MESSENGER_WA_TOKEN`, `MESSENGER_MAX_TOKEN`), в репозиторий их не класть.
 
 Формы экрана сверяют cookie `delo_csrf`.
 
@@ -103,7 +158,10 @@ curl -sS -H "Content-Type: application/json" \
 |---|---|
 | База и файлы, основной | `/srv/delo-crm/` (`delo.db`, каталог `files/`) |
 | То же, если удобнее дерево ati | `/srv/ati/delo-crm/` |
-| Секреты | `/srv/ati/secrets/delo-crm.env` (mode `600`) и `delo-crm.htpasswd` |
+| Секреты приложения | `/root/ati/secrets/delo-crm.env` (mode `600`) |
+| Пароли Сергея и Андрея | `/root/ati/secrets/delo-crm-auth.env` (mode `600`) |
+| Старый файл, если уже создан | `/srv/ati/secrets/delo-crm.env` — юнит его тоже читает |
+| htpasswd nginx | `/srv/ati/secrets/delo-crm.htpasswd` (не в `/root`: www-data туда не зайдёт) |
 
 В env боевого хоста:
 
@@ -123,14 +181,17 @@ NOTIFY_TG=0
 
 ```sh
 sudo useradd --system --create-home --home-dir /var/lib/delo --shell /usr/sbin/nologin delo || true
-sudo mkdir -p /opt/delo-crm /srv/delo-crm/files /srv/ati/secrets
+sudo mkdir -p /opt/delo-crm /srv/delo-crm/files /root/ati/secrets /srv/ati/secrets
 sudo chown -R delo:delo /srv/delo-crm
 # код в /opt/delo-crm, затем:
 sudo python3 -m venv /opt/delo-crm/.venv
 sudo /opt/delo-crm/.venv/bin/pip install -r /opt/delo-crm/requirements.txt
 sudo chown -R delo:delo /opt/delo-crm
-sudo install -m 600 /dev/null /srv/ati/secrets/delo-crm.env
-# заполнить env на сервере, не из репозитория
+sudo install -m 600 /dev/null /root/ati/secrets/delo-crm.env
+sudo install -m 600 /dev/null /root/ati/secrets/delo-crm-auth.env
+# заполнить оба файла на сервере, не из репозитория
+# delo-crm.env — PORT, DATA_DIR, INBOUND_SECRET, AUTH_MODE, NOTIFY_TG, MESSENGER_*
+# delo-crm-auth.env — DELO_USER_SERGEY_PASSWORD, DELO_USER_ANDREY_PASSWORD и роли
 sudo cp deploy/delo-crm.service /etc/systemd/system/delo-crm.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now delo-crm
@@ -159,6 +220,8 @@ curl -sS -H "Content-Type: application/json" \
 |---|---|---|
 | `HOST` | адрес bind, только loopback | `127.0.0.1` |
 | `PORT` | порт за nginx | `8091` |
+| `LIMIT_CONCURRENCY` | запросов сразу в одном процессе | `20` |
+| `BACKLOG` | очередь сокета | `16` |
 | `DATA_DIR` | каталог файлов | пусто → `./data` |
 | `SQLITE_PATH` | файл базы | пусто → `$DATA_DIR/delo.db` |
 | `INBOUND_SECRET` | секрет `/s/*` | пусто |
@@ -166,11 +229,19 @@ curl -sS -H "Content-Type: application/json" \
 | `UI_USER` | логин basic | пусто |
 | `UI_PASSWORD` | пароль basic | пусто |
 | `UI_GATE_SECRET` | если nginx шлёт `X-Delo-Gate` | пусто |
-| `UI_DISPLAY_NAME` | подпись в шапке | `Андрей (логист)` |
+| `UI_DISPLAY_NAME` | подпись в шапке без входа | `Андрей (логист)` |
 | `NOTIFY_TG` | звать Telegram при смене статуса | `0` |
-| `TG_BOT_TOKEN` | токен, только если флаг 1 | пусто |
-| `TG_CHAT_ID` | чат, только если флаг 1 | пусто |
+| `TG_BOT_TOKEN` | токен статуса, только если флаг 1 | пусто |
+| `TG_CHAT_ID` | чат статуса, только если флаг 1 | пусто |
+| `MESSENGER_CHECK` | `off`, `mock`, `live` | `off` |
+| `MESSENGER_TG_TOKEN` | токен проверки/отправки Telegram, адаптер не подключён | пусто |
+| `MESSENGER_WA_TOKEN` | токен WhatsApp, адаптер не подключён | пусто |
+| `MESSENGER_MAX_TOKEN` | токен MAX, адаптер не подключён | пусто |
+| `DELO_USER_SERGEY_PASSWORD` | пароль Сергея | пусто |
+| `DELO_USER_SERGEY_ROLE` | `dispatcher` или `operator` | `dispatcher` |
+| `DELO_USER_ANDREY_PASSWORD` | пароль Андрея | пусто |
+| `DELO_USER_ANDREY_ROLE` | `dispatcher` или `operator` | `operator` |
 
 ## Чего в этой версии нет
 
-SMTP, автоподпись, разбор PDF в поля, оплата, новый VPS, перенос Telegram, IMAP. Входящее письмо позже может прислать воркер Вишну тем же `POST /s/inbound/doc`.
+SMTP, автоподпись, разбор PDF в поля, оплата, новый VPS, перенос Telegram, IMAP, боевые токены MAX и WhatsApp. Входящее письмо позже может прислать воркер Вишну тем же `POST /s/inbound/doc`. Проверка мессенджеров и отправка в Telegram с карточки — заглушка, см. выше.

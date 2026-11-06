@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import base64
 import hmac
 import secrets
 from pathlib import Path
@@ -12,9 +11,11 @@ from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from app.api import router as api_router
+from app.auth import authenticate, sync_users
 from app.config import Settings
 from app.db import Database
 from app.logic import ApiError
+from app.parties import backfill
 from app.ui import router as ui_router
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -27,23 +28,12 @@ def _eq(left: str, right: str) -> bool:
     return hmac.compare_digest(left, right)
 
 
-def _basic_ok(header: str, user: str, password: str) -> bool:
-    if not header.startswith("Basic "):
-        return False
-    try:
-        raw = base64.b64decode(header.split(" ", 1)[1], validate=True).decode("utf-8")
-    except Exception:
-        return False
-    got_user, sep, got_password = raw.partition(":")
-    if not sep:
-        return False
-    return _eq(got_user, user) and _eq(got_password, password)
-
-
 def create_app() -> FastAPI:
     settings = Settings.from_env()
     db = Database(settings)
     db.init()
+    backfill(db, settings)
+    sync_users(db)
     app = FastAPI(title="ATI Delivery CRM", docs_url=None, redoc_url=None, openapi_url=None)
     app.state.settings = settings
     app.state.db = db
@@ -52,17 +42,20 @@ def create_app() -> FastAPI:
     async def guard(request: Request, call_next):
         token = request.cookies.get("delo_csrf") or secrets.token_urlsafe(24)
         request.state.csrf = token
+        request.state.user = None
         path = request.url.path
         if path not in OPEN_PATHS and not path.startswith("/s/"):
             mode = settings.auth_mode
             if mode == "basic":
-                if not _basic_ok(request.headers.get("authorization", ""), settings.ui_user, settings.ui_password):
+                user = authenticate(db, settings, request.headers.get("authorization", ""))
+                if not user:
                     return Response(
                         "Нужен вход.",
                         status_code=401,
                         headers={"WWW-Authenticate": 'Basic realm="ATI Delivery CRM"'},
                         media_type="text/plain; charset=utf-8",
                     )
+                request.state.user = user
             elif mode == "proxy" and settings.ui_gate_secret:
                 if not _eq(request.headers.get("x-delo-gate", ""), settings.ui_gate_secret):
                     return PlainTextResponse("Нужен вход через nginx.", status_code=401)

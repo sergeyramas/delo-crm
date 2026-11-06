@@ -26,6 +26,10 @@ class Settings:
     notify_tg: bool
     tg_token: str
     tg_chat: str
+    messenger_check: str
+    messenger_tg_token: str
+    messenger_wa_token: str
+    messenger_max_token: str
 
     def __repr__(self) -> str:
         return (
@@ -42,8 +46,18 @@ class Settings:
             raise RuntimeError("AUTH_MODE должен быть off, basic или proxy.")
         ui_user = os.environ.get("UI_USER", "")
         ui_password = os.environ.get("UI_PASSWORD", "")
-        if auth_mode == "basic" and (not ui_user or not ui_password):
-            raise RuntimeError("AUTH_MODE=basic требует UI_USER и UI_PASSWORD.")
+        named_passwords = (
+            os.environ.get("DELO_USER_SERGEY_PASSWORD", "").strip()
+            or os.environ.get("DELO_USER_ANDREY_PASSWORD", "").strip()
+        )
+        if auth_mode == "basic" and not (ui_user and ui_password) and not named_passwords:
+            raise RuntimeError(
+                "AUTH_MODE=basic требует UI_USER/UI_PASSWORD или пароли "
+                "DELO_USER_SERGEY_PASSWORD и DELO_USER_ANDREY_PASSWORD."
+            )
+        messenger_check = os.environ.get("MESSENGER_CHECK", "off").strip().lower() or "off"
+        if messenger_check not in {"off", "mock", "live"}:
+            raise RuntimeError("MESSENGER_CHECK должен быть off, mock или live.")
         display = os.environ.get("UI_DISPLAY_NAME", "").strip() or "Андрей (логист)"
         return cls(
             data_dir=data_dir,
@@ -57,4 +71,8 @@ class Settings:
             notify_tg=_flag("NOTIFY_TG", "0"),
             tg_token=os.environ.get("TG_BOT_TOKEN", ""),
             tg_chat=os.environ.get("TG_CHAT_ID", ""),
+            messenger_check=messenger_check,
+            messenger_tg_token=os.environ.get("MESSENGER_TG_TOKEN", ""),
+            messenger_wa_token=os.environ.get("MESSENGER_WA_TOKEN", ""),
+            messenger_max_token=os.environ.get("MESSENGER_MAX_TOKEN", ""),
         )

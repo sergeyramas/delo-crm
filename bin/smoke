@@ -55,11 +55,11 @@ curl -sS -o "$TMP/body.json" -w "%{http_code}" \
   -H "Content-Type: application/json" \
   -H "X-Inbound-Secret: $INBOUND_SECRET" \
   -X POST "http://127.0.0.1:$PORT/s/inbound/doc" \
-  --data '{"source":"mail","from":"Иванова <docs@example.ru>","subject":"Заявка Москва Казань","text":"Просьба подписать заявку","client_hint":"ООО «Северный Хлеб»"}' \
+  --data '{"source":"mail","from":"Иванова <docs@example.ru>","subject":"Заявка Москва Казань","text":"Просьба подписать заявку","client_hint":"ООО «Северный Хлеб»","client_phone":"+7 903 000-11-22","client_inn":"7701123456"}' \
   >"$TMP/code.txt"
 
 "$PY" - "$TMP" "$PORT" <<'PY'
-import json, sys, urllib.request
+import json, os, sqlite3, sys, urllib.request
 from datetime import date
 from pathlib import Path
 
@@ -83,7 +83,28 @@ if body["number"] not in page or "polucheno" not in page or "ATI Delivery" not i
 listing = urllib.request.urlopen(f"http://127.0.0.1:{port}/").read().decode()
 if "Список сделок" not in listing or body["number"] not in listing:
     raise SystemExit("список не открылся")
-print("ui ok")
+if "/parties/" not in page:
+    raise SystemExit("нет ссылки на карточку заказчика")
+if "из " not in listing:
+    raise SystemExit("список без страниц")
+secret = os.environ["INBOUND_SECRET"]
+second_req = urllib.request.Request(
+    f"http://127.0.0.1:{port}/s/inbound/doc",
+    data=json.dumps({
+        "source": "manual",
+        "text": "вторая заявка того же телефона",
+        "client_hint": "Другое имя",
+        "client_phone": "8 903 000-11-22",
+    }).encode(),
+    headers={"Content-Type": "application/json", "X-Inbound-Secret": secret},
+)
+with urllib.request.urlopen(second_req) as resp:
+    second = json.load(resp)
+con = sqlite3.connect(tmp / "delo.db")
+clients = con.execute("select count(*) from parties where kind = 'client'").fetchone()[0]
+if clients != 1:
+    raise SystemExit(f"ждали одну карточку заказчика, в базе {clients}")
+print("ui ok", second["number"])
 PY
 
 code401=$(curl -sS -o /dev/null -w "%{http_code}" \
