@@ -10,7 +10,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 
-from app.api import router as api_router
+from app.api import inbound_ok, router as api_router
 from app.auth import authenticate, sync_users
 from app.config import Settings
 from app.db import Database
@@ -38,27 +38,39 @@ def create_app() -> FastAPI:
     app.state.settings = settings
     app.state.db = db
 
+    def _deny_ui(request: Request) -> Response | None:
+        mode = settings.auth_mode
+        if mode == "basic":
+            user = authenticate(db, settings, request.headers.get("authorization", ""))
+            if not user:
+                return Response(
+                    "Нужен вход.",
+                    status_code=401,
+                    headers={"WWW-Authenticate": 'Basic realm="ATI Delivery CRM"'},
+                    media_type="text/plain; charset=utf-8",
+                )
+            request.state.user = user
+        elif mode == "proxy" and settings.ui_gate_secret:
+            if not _eq(request.headers.get("x-delo-gate", ""), settings.ui_gate_secret):
+                return PlainTextResponse("Нужен вход через nginx.", status_code=401)
+        return None
+
     @app.middleware("http")
     async def guard(request: Request, call_next):
         token = request.cookies.get("delo_csrf") or secrets.token_urlsafe(24)
         request.state.csrf = token
         request.state.user = None
         path = request.url.path
-        if path not in OPEN_PATHS and not path.startswith("/s/"):
-            mode = settings.auth_mode
-            if mode == "basic":
-                user = authenticate(db, settings, request.headers.get("authorization", ""))
-                if not user:
-                    return Response(
-                        "Нужен вход.",
-                        status_code=401,
-                        headers={"WWW-Authenticate": 'Basic realm="ATI Delivery CRM"'},
-                        media_type="text/plain; charset=utf-8",
-                    )
-                request.state.user = user
-            elif mode == "proxy" and settings.ui_gate_secret:
-                if not _eq(request.headers.get("x-delo-gate", ""), settings.ui_gate_secret):
-                    return PlainTextResponse("Нужен вход через nginx.", status_code=401)
+        # /api/* — тот же вход, что у экранов, либо секрет шлюза (воркер на 127.0.0.1).
+        if path.startswith("/api/"):
+            if not inbound_ok(request):
+                denied = _deny_ui(request)
+                if denied is not None:
+                    return denied
+        elif path not in OPEN_PATHS and not path.startswith("/s/"):
+            denied = _deny_ui(request)
+            if denied is not None:
+                return denied
         response = await call_next(request)
         if request.cookies.get("delo_csrf") != token:
             response.set_cookie("delo_csrf", token, httponly=True, samesite="lax", path="/")

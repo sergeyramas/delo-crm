@@ -52,6 +52,7 @@ from app.parties import (
     telegram_signature,
     whatsapp_href,
 )
+from app.scans import MAX_SCAN, driver_scan_view, org_card_brief, save_party_scan, scan_file
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
@@ -93,12 +94,14 @@ ERRS = {
     "confirm": "Отправка только после подтверждения. Сообщение не ушло.",
     "write": "Не удалось записать сообщение.",
     "party": "Карточка не найдена.",
+    "scan": "Не удалось принять скан. Нужен PDF, JPG или PNG до 12 МБ, и только на карточке водителя.",
 }
 
 WROTE = {
     "local": "Текст записан в CRM от имени «Ассистент Андрея». В Telegram он не уходил: это заглушка.",
     "not_sent": "Наружу ничего не ушло. Черновик лежит в этой карточке.",
     "checked": "Отметки мессенджеров обновлены.",
+    "scan": "Скан записан на диск CRM. В заявку он сам не подставляется.",
 }
 
 
@@ -337,6 +340,8 @@ def page_card(request: Request, key: str):
         "events": events[-8:],
         "event_count": event_count,
         "docs": _docs(db, package["id"]),
+        "driver_scans": driver_scan_view(db, package.get("driver_party_id")),
+        "org_card": org_card_brief(db, package["id"]),
     })
     return templates.TemplateResponse(request, "card.html", ctx)
 
@@ -592,6 +597,7 @@ def page_party(request: Request, party_id: int):
         "messenger_note": mode_note(request.app.state.settings),
         "back_id": back_id,
         "tg_actor": TG_ACTOR,
+        "scans": driver_scan_view(request.app.state.db, party["id"]) if party["kind"] == "driver" else [],
     })
     return templates.TemplateResponse(request, "party.html", ctx)
 
@@ -666,6 +672,68 @@ async def party_write(request: Request, party_id: int):
     join = "&" if suffix else "?"
     note = "local" if saved["status"] == "local" else "not_sent"
     return _redirect(f"/parties/{party_id}{suffix}{join}note={note}")
+
+
+async def _read_upload(upload) -> bytes:
+    if upload is None or not getattr(upload, "filename", ""):
+        raise ApiError(422, "Пустой файл.")
+    chunks = []
+    total = 0
+    while True:
+        chunk = await upload.read(64 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > MAX_SCAN:
+            chunks.clear()
+            raise ApiError(413, "Файл больше 12 МБ.")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+@router.post("/parties/{party_id}/scans")
+async def party_scan_upload(request: Request, party_id: int):
+    form = await request.form()
+    back = _form_last(form, "from")
+    suffix = f"?from={back}" if str(back).isdigit() else ""
+    upload = form.get("file")
+    try:
+        check_csrf(request, form.get("csrf"))
+        blob = await _read_upload(upload)
+        save_party_scan(
+            request.app.state.db,
+            party_id,
+            _form_last(form, "kind"),
+            getattr(upload, "filename", "") or "",
+            blob,
+        )
+    except ApiError as exc:
+        code = "csrf" if exc.message == "csrf" else "scan"
+        return _redirect(f"/parties/{party_id}{suffix}", code)
+    finally:
+        close = getattr(upload, "close", None)
+        if close is not None:
+            result = close()
+            if hasattr(result, "__await__"):
+                await result
+    join = "&" if suffix else "?"
+    return _redirect(f"/parties/{party_id}{suffix}{join}note=scan")
+
+
+@router.get("/parties/{party_id}/scans/{kind}")
+def party_scan_download(request: Request, party_id: int, kind: str, download: int = 0):
+    try:
+        path, name, media = scan_file(request.app.state.db, party_id, kind)
+    except ApiError:
+        ctx = base_ctx(request, "card")
+        return templates.TemplateResponse(request, "missing.html", ctx, status_code=404)
+    return FileResponse(
+        path,
+        media_type=media,
+        filename=name,
+        content_disposition_type="attachment" if download else "inline",
+        headers={"Cache-Control": "private, no-store"},
+    )
 
 
 @router.get("/files/{file_id}")

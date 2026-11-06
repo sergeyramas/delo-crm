@@ -59,7 +59,7 @@ curl -sS -o "$TMP/body.json" -w "%{http_code}" \
   >"$TMP/code.txt"
 
 "$PY" - "$TMP" "$PORT" <<'PY'
-import json, os, sqlite3, sys, urllib.request
+import json, os, sqlite3, sys, urllib.parse, urllib.request
 from datetime import date
 from pathlib import Path
 
@@ -100,11 +100,46 @@ second_req = urllib.request.Request(
 )
 with urllib.request.urlopen(second_req) as resp:
     second = json.load(resp)
+driver_req = urllib.request.Request(
+    f"http://127.0.0.1:{port}/s/inbound/doc",
+    data=json.dumps({
+        "source": "manual",
+        "text": "водитель без сканов",
+        "client_phone": "8 903 000-11-22",
+        "driver_name": "Тестов Водитель",
+        "plate": "А000АА 00",
+        "vehicle": "тент",
+    }).encode(),
+    headers={"Content-Type": "application/json", "X-Inbound-Secret": secret},
+)
+with urllib.request.urlopen(driver_req) as resp:
+    driver_pkg = json.load(resp)
+deal = urllib.request.urlopen(f"http://127.0.0.1:{port}/packages/{driver_pkg['id']}").read().decode()
+for needle in ("нет СТС", "нет прав", "нет паспорта", "А000АА 00"):
+    if needle not in deal:
+        raise SystemExit(f"на сделке нет «{needle}»")
+quoted = urllib.parse.quote(driver_pkg["number"])
+with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/packages/{quoted}/client-attachments") as resp:
+    attachments = json.load(resp)
+if attachments.get("attachments"):
+    raise SystemExit(f"сканов быть не должно: {attachments}")
+if attachments.get("missing") != ["sts", "license", "passport"]:
+    raise SystemExit(f"ждали три пропуска, пришло {attachments}")
+if attachments.get("plate") != "А000АА 00":
+    raise SystemExit(f"госномер не пришёл: {attachments}")
 con = sqlite3.connect(tmp / "delo.db")
 clients = con.execute("select count(*) from parties where kind = 'client'").fetchone()[0]
 if clients != 1:
     raise SystemExit(f"ждали одну карточку заказчика, в базе {clients}")
-print("ui ok", second["number"])
+driver = con.execute("select id from parties where kind = 'driver'").fetchone()
+if driver is None:
+    raise SystemExit("нет карточки водителя")
+driver_page = urllib.request.urlopen(f"http://127.0.0.1:{port}/parties/{driver[0]}").read().decode()
+if "Сканы для пакета заказчику" not in driver_page or 'type="file"' not in driver_page:
+    raise SystemExit("на карточке водителя нет загрузки сканов")
+if con.execute("select count(*) from party_scans").fetchone()[0] != 0:
+    raise SystemExit("заявка не должна создавать сканы")
+print("ui ok", second["number"], "scans", driver_pkg["number"])
 PY
 
 code401=$(curl -sS -o /dev/null -w "%{http_code}" \
