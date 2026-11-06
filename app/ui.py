@@ -101,6 +101,10 @@ ERRS = {
     "gap": "Сначала выберите перевозчика, ТС и водителя.",
     "package": "Заявка не найдена. Укажите номер, например Д-2026-0001.",
     "message": "Сообщение не найдено.",
+    "gps": "Не удалось записать GPS.",
+    "gps_channel": "Канал инструкции: MAX, Telegram или почта водителя.",
+    "gps_email": "В карточке водителя нет почты. Черновик на почту не записан.",
+    "gps_driver": "На сделке нет водителя. Инструкцию отправить некуда.",
 }
 
 WROTE = {
@@ -113,6 +117,8 @@ WROTE = {
     "saved": "Сохранено.",
     "nego": "Заметка переговоров записана.",
     "bound": "Сообщение привязано к заявке. Наружу ничего не ушло.",
+    "gps_invited": "Инструкция записана черновиком. В MAX, Telegram и на почту ничего не ушло. Статус GPS: приглашён.",
+    "gps_track": "Заглушка ATI: users_activity и map_route не вызывались. Последней точки нет.",
 }
 
 
@@ -284,10 +290,13 @@ def _redirect(path: str, err: str | None = None, note: str | None = None) -> Red
         extra.append(f"err={err}")
     if note:
         extra.append(f"note={note}")
+    base, mark, frag = path.partition("#")
     if extra:
-        join = "&" if "?" in path else "?"
-        path = f"{path}{join}" + "&".join(extra)
-    return RedirectResponse(path, status_code=303)
+        join = "&" if "?" in base else "?"
+        base = f"{base}{join}" + "&".join(extra)
+    if mark:
+        base = f"{base}#{frag}"
+    return RedirectResponse(base, status_code=303)
 
 
 def _safe_back(raw: str, fallback: str) -> str:
@@ -405,8 +414,16 @@ def page_card(request: Request, key: str):
         "linked": _linked(request, package),
         "deal_tab": "card",
         "message_count": _message_count(db, package["id"]),
+        "gps": _gps_package(request, package),
     })
     return templates.TemplateResponse(request, "card.html", ctx)
+
+
+def _gps_package(request: Request, package: dict) -> dict:
+    from app.gps import panel_package
+
+    user = getattr(request.state, "user", None)
+    return panel_package(request.app.state.db, user, package)
 
 
 def _haul(request: Request, package: dict) -> dict:
@@ -823,8 +840,16 @@ def page_party(request: Request, party_id: int):
         "back_id": back_id,
         "tg_actor": TG_ACTOR,
         "scans": driver_scan_view(request.app.state.db, party["id"]) if party["kind"] == "driver" else [],
+        "gps": _gps_party(request, row, back) if party["kind"] == "driver" else None,
     })
     return templates.TemplateResponse(request, "party.html", ctx)
+
+
+def _gps_party(request: Request, party: dict, back: str) -> dict:
+    from app.gps import panel_party
+
+    user = getattr(request.state, "user", None)
+    return panel_party(request.app.state.db, user, party, back)
 
 
 @router.post("/parties/{party_id}/messengers")
@@ -969,6 +994,128 @@ def download(request: Request, file_id: int):
         ctx = base_ctx(request, "card")
         return templates.TemplateResponse(request, "missing.html", ctx, status_code=404)
     return FileResponse(path, filename=name, content_disposition_type="attachment")
+
+
+def _safe_next(raw: str, fallback: str) -> str:
+    text = (raw or "").strip()
+    if text.startswith("/") and not text.startswith("//") and "://" not in text and len(text) < 300:
+        return text
+    return fallback
+
+
+def _gps_err(exc: ApiError) -> str:
+    if exc.message in {"csrf", "gps", "gps_channel", "gps_email", "gps_driver"}:
+        return exc.message
+    if exc.status == 404:
+        return "party"
+    return "gps"
+
+
+@router.post("/packages/{key}/gps/track")
+async def package_gps_track(request: Request, key: str):
+    from app.gps import track
+
+    form = await request.form()
+    try:
+        check_csrf(request, form.get("csrf"))
+        package = _one(request.app.state.db, key)
+        track(request.app.state.db, actor=actor_name(request), package_id=package["id"])
+    except ApiError as exc:
+        target = f"/packages/{key}"
+        return _redirect(target, "csrf" if exc.message == "csrf" else _gps_err(exc))
+    return _redirect(_safe_next(_form_last(form, "next"), f"/packages/{package['id']}#gps"), note="gps_track")
+
+
+@router.post("/packages/{key}/gps/instruction")
+async def package_gps_instruction(request: Request, key: str):
+    from app.gps import send_instruction
+
+    form = await request.form()
+    try:
+        check_csrf(request, form.get("csrf"))
+        package = _one(request.app.state.db, key)
+        send_instruction(
+            request.app.state.db,
+            channel=_form_last(form, "channel"),
+            actor=actor_name(request),
+            package_id=package["id"],
+        )
+    except ApiError as exc:
+        return _redirect(f"/packages/{key}", "csrf" if exc.message == "csrf" else _gps_err(exc))
+    return _redirect(_safe_next(_form_last(form, "next"), f"/packages/{package['id']}#gps"), note="gps_invited")
+
+
+@router.post("/parties/{party_id}/gps/track")
+async def party_gps_track(request: Request, party_id: int):
+    from app.gps import track
+
+    form = await request.form()
+    fallback = f"/parties/{party_id}#gps"
+    try:
+        check_csrf(request, form.get("csrf"))
+        track(request.app.state.db, actor=actor_name(request), party_id=party_id)
+    except ApiError as exc:
+        return _redirect(fallback, "csrf" if exc.message == "csrf" else _gps_err(exc))
+    return _redirect(_safe_next(_form_last(form, "next"), fallback), note="gps_track")
+
+
+@router.post("/parties/{party_id}/gps/instruction")
+async def party_gps_instruction(request: Request, party_id: int):
+    from app.gps import send_instruction
+
+    form = await request.form()
+    fallback = f"/parties/{party_id}#gps"
+    raw_deal = _form_last(form, "package_id")
+    package_id = int(raw_deal) if raw_deal.isdigit() else None
+    if package_id:
+        row = request.app.state.db.one("SELECT driver_party_id FROM packages WHERE id = ?", (package_id,))
+        if not row or row.get("driver_party_id") != party_id:
+            package_id = None
+    try:
+        check_csrf(request, form.get("csrf"))
+        send_instruction(
+            request.app.state.db,
+            channel=_form_last(form, "channel"),
+            actor=actor_name(request),
+            party_id=party_id,
+            package_id=package_id,
+        )
+    except ApiError as exc:
+        return _redirect(fallback, "csrf" if exc.message == "csrf" else _gps_err(exc))
+    return _redirect(_safe_next(_form_last(form, "next"), fallback), note="gps_invited")
+
+
+@router.post("/drivers/{driver_id}/gps/track")
+async def driver_gps_track(request: Request, driver_id: int):
+    from app.gps import track
+
+    form = await request.form()
+    fallback = "/drivers"
+    try:
+        check_csrf(request, form.get("csrf"))
+        track(request.app.state.db, actor=actor_name(request), driver_id=driver_id)
+    except ApiError as exc:
+        return _redirect(fallback, "csrf" if exc.message == "csrf" else _gps_err(exc))
+    return _redirect(_safe_next(_form_last(form, "next"), fallback), note="gps_track")
+
+
+@router.post("/drivers/{driver_id}/gps/instruction")
+async def driver_gps_instruction(request: Request, driver_id: int):
+    from app.gps import send_instruction
+
+    form = await request.form()
+    fallback = "/drivers"
+    try:
+        check_csrf(request, form.get("csrf"))
+        send_instruction(
+            request.app.state.db,
+            channel=_form_last(form, "channel"),
+            actor=actor_name(request),
+            driver_id=driver_id,
+        )
+    except ApiError as exc:
+        return _redirect(fallback, "csrf" if exc.message == "csrf" else _gps_err(exc))
+    return _redirect(_safe_next(_form_last(form, "next"), fallback), note="gps_invited")
 
 
 def list_query(stage: str, status: str, **extra) -> str:

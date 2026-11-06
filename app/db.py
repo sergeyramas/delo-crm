@@ -70,6 +70,9 @@ CREATE TABLE IF NOT EXISTS packages (
     load_window TEXT NOT NULL DEFAULT '',
     payment_terms TEXT NOT NULL DEFAULT '',
     shipper_contact TEXT NOT NULL DEFAULT '',
+    gps_status TEXT NOT NULL DEFAULT 'off',
+    gps_invited_at TEXT NOT NULL DEFAULT '',
+    dispatcher_login TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     UNIQUE(year, seq)
@@ -150,6 +153,8 @@ CREATE TABLE IF NOT EXISTS parties (
     wa_status TEXT NOT NULL DEFAULT 'unknown',
     max_status TEXT NOT NULL DEFAULT 'unknown',
     messengers_checked_at TEXT NOT NULL DEFAULT '',
+    gps_status TEXT NOT NULL DEFAULT 'off',
+    gps_invited_at TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -301,6 +306,8 @@ CREATE TABLE IF NOT EXISTS drivers (
     consent INTEGER NOT NULL DEFAULT 0,
     consent_at TEXT NOT NULL DEFAULT '',
     user_is_carrier INTEGER NOT NULL DEFAULT 0,
+    gps_status TEXT NOT NULL DEFAULT 'off',
+    gps_invited_at TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -341,6 +348,51 @@ CREATE INDEX IF NOT EXISTS idx_drivers_carrier ON drivers(carrier_id);
 CREATE INDEX IF NOT EXISTS idx_fleet_files_owner ON fleet_files(owner_kind, owner_id);
 CREATE INDEX IF NOT EXISTS idx_negotiations_pkg ON negotiations(package_id, id);
 CREATE INDEX IF NOT EXISTS idx_tracks_pkg ON package_doc_tracks(package_id);
+
+-- Точки GPS. expires_at пустой, пока рейс не завершён
+-- (стадия не dostavlen / originaly / otkaz). После завершения точка живёт 30 суток.
+CREATE TABLE IF NOT EXISTS gps_points (
+    id INTEGER PRIMARY KEY,
+    package_id INTEGER REFERENCES packages(id) ON DELETE CASCADE,
+    party_id INTEGER REFERENCES parties(id) ON DELETE CASCADE,
+    driver_id INTEGER REFERENCES drivers(id) ON DELETE CASCADE,
+    lat REAL,
+    lon REAL,
+    recorded_at TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'stub',
+    expires_at TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS gps_drafts (
+    id INTEGER PRIMARY KEY,
+    package_id INTEGER REFERENCES packages(id) ON DELETE CASCADE,
+    party_id INTEGER REFERENCES parties(id) ON DELETE CASCADE,
+    driver_id INTEGER REFERENCES drivers(id) ON DELETE CASCADE,
+    channel TEXT NOT NULL,
+    body TEXT NOT NULL,
+    attachment TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'draft',
+    actor TEXT NOT NULL DEFAULT '',
+    detail TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS gps_polls (
+    id INTEGER PRIMARY KEY,
+    package_id INTEGER,
+    party_id INTEGER,
+    driver_id INTEGER,
+    endpoint TEXT NOT NULL,
+    called INTEGER NOT NULL DEFAULT 0,
+    reason TEXT NOT NULL DEFAULT '',
+    actor TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_gps_points_pkg ON gps_points(package_id, id);
+CREATE INDEX IF NOT EXISTS idx_gps_drafts_party ON gps_drafts(party_id, id);
+CREATE INDEX IF NOT EXISTS idx_gps_polls_party ON gps_polls(party_id, id);
 """
 
 
@@ -374,10 +426,23 @@ class Database:
             "load_window": "load_window TEXT NOT NULL DEFAULT ''",
             "payment_terms": "payment_terms TEXT NOT NULL DEFAULT ''",
             "shipper_contact": "shipper_contact TEXT NOT NULL DEFAULT ''",
+            "gps_status": "gps_status TEXT NOT NULL DEFAULT 'off'",
+            "gps_invited_at": "gps_invited_at TEXT NOT NULL DEFAULT ''",
+            "dispatcher_login": "dispatcher_login TEXT NOT NULL DEFAULT ''",
         }
         for name, ddl in adds.items():
             if name not in cols:
                 self.conn.execute(f"ALTER TABLE packages ADD COLUMN {ddl}")
+        party_cols = {row["name"] for row in self.conn.execute("PRAGMA table_info(parties)")}
+        if "gps_status" not in party_cols:
+            self.conn.execute("ALTER TABLE parties ADD COLUMN gps_status TEXT NOT NULL DEFAULT 'off'")
+        if "gps_invited_at" not in party_cols:
+            self.conn.execute("ALTER TABLE parties ADD COLUMN gps_invited_at TEXT NOT NULL DEFAULT ''")
+        driver_cols = {row["name"] for row in self.conn.execute("PRAGMA table_info(drivers)")}
+        if "gps_status" not in driver_cols:
+            self.conn.execute("ALTER TABLE drivers ADD COLUMN gps_status TEXT NOT NULL DEFAULT 'off'")
+        if "gps_invited_at" not in driver_cols:
+            self.conn.execute("ALTER TABLE drivers ADD COLUMN gps_invited_at TEXT NOT NULL DEFAULT ''")
         self.conn.execute(
             "INSERT OR IGNORE INTO expeditor (id, updated_at) VALUES (1, '')"
         )

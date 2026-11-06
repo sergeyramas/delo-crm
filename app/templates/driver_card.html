@@ -48,4 +48,9 @@
   </form>
   {% endif %}
 </div>
+{% if driver.gps %}
+<div class="card" id="gps">
+  {% with gps=driver.gps %}{% include "_gps.html" %}{% endwith %}
+</div>
+{% endif %}
 {% endblock %}
