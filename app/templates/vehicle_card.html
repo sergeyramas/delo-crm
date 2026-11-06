@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}ATI Delivery · CRM — {{ vehicle.plate }}{% endblock %}
+{% block body %}
+<div class="card">
+  <div class="mut"><a href="/carriers/{{ carrier.id }}#vehicles">← {{ carrier.name }}</a></div>
+  <h1>{{ vehicle.plate }}</h1>
+  <p class="mut">Машина перевозчика {{ carrier.name }}{% if vehicle.make_model %} · {{ vehicle.make_model }}{% endif %}</p>
+</div>
+<div class="card">
+  <h2>Поля</h2>
+  <form method="post" action="/carriers/{{ carrier.id }}/vehicles/{{ vehicle.id }}">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    {% with prefix='vehicle', item=vehicle %}{% include "vehicle_fields.html" %}{% endwith %}
+    {% if can_write %}<p><button class="btn" type="submit">Сохранить ТС</button></p>{% endif %}
+  </form>
+  <p>
+    {% if vehicle.sts_file %}
+    <span class="badge yes">СТС есть</span>
+    <a class="dl" href="/fleet-files/{{ vehicle.sts_file.id }}">{{ vehicle.sts_file.original_name }}</a>
+    {% else %}
+    <span class="badge missing">нет скана СТС</span>
+    {% endif %}
+  </p>
+  {% if can_write %}
+  <form method="post" action="/carriers/{{ carrier.id }}/files" enctype="multipart/form-data">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="kind" value="sts">
+    <input type="hidden" name="vehicle_id" value="{{ vehicle.id }}">
+    <div class="field">
+      <label for="sts-file">Скан СТС, PDF, JPG или PNG</label>
+      <input id="sts-file" name="file" type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" required>
+    </div>
+    <p><button class="btn" type="submit">{% if vehicle.sts_file %}Заменить СТС{% else %}Загрузить СТС{% endif %}</button></p>
+  </form>
+  <form method="post" action="/carriers/{{ carrier.id }}/vehicles/{{ vehicle.id }}/delete">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button class="btn ghost" type="submit">Удалить ТС</button>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}

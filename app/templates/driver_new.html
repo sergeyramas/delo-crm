@@ -11,6 +11,10 @@
   <form method="post" action="/drivers" enctype="multipart/form-data">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <input type="hidden" name="next" value="{{ next or '' }}">
+    {% if locked_carrier %}
+    <input type="hidden" name="carrier_id" value="{{ locked_carrier.id }}">
+    <p class="src">Водитель сразу числится у {{ locked_carrier.name }}.</p>
+    {% else %}
     <div class="field">
       <label for="carrier_id">У какого перевозчика числится</label>
       <select id="carrier_id" name="carrier_id" required>
@@ -20,6 +24,7 @@
         {% endfor %}
       </select>
     </div>
+    {% endif %}
     {% with prefix='new', item=none %}{% include "driver_fields.html" %}{% endwith %}
     <div class="fields">
       <div class="field">

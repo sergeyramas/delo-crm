@@ -305,6 +305,123 @@ def test_add_forms_and_scans_follow_the_package(client):
     assert "license.pdf" in fresh.text
 
 
+def test_carrier_card_adds_driver_and_vehicle_inside(client):
+    ids = _doronin(client)
+    carrier_id = ids["carrier_id"]
+    page = client.get(f"/carriers/{carrier_id}")
+    assert page.status_code == 200, page.text
+    assert "+ Водитель" in page.text
+    assert "+ Машина" in page.text
+    assert f'/carriers/{carrier_id}/drivers/{ids["driver_id"]}' in page.text
+    assert f'/carriers/{carrier_id}/vehicles/{ids["vehicle_id"]}' in page.text
+    assert "Х 822 ВЕ 252" in page.text
+    assert "Доронин Артём Олегович" in page.text
+
+    driver_form = client.get(f"/carriers/{carrier_id}?add=driver")
+    assert 'name="carrier_id" value="' + str(carrier_id) + '"' in driver_form.text
+    assert 'id="carrier_id"' not in driver_form.text
+    assert "Выберите перевозчика" not in driver_form.text
+    assert 'name="passport"' in driver_form.text
+    assert 'name="license"' in driver_form.text
+    assert 'name="name"' in driver_form.text
+    vehicle_form = client.get(f"/carriers/{carrier_id}?add=vehicle")
+    assert 'name="carrier_id" value="' + str(carrier_id) + '"' in vehicle_form.text
+    assert 'name="sts"' in vehicle_form.text
+    assert 'name="plate"' in vehicle_form.text
+    assert 'id="carrier_id"' not in vehicle_form.text
+
+    locked = client.get(f"/drivers/new?carrier_id={carrier_id}")
+    assert 'name="carrier_id" value="' + str(carrier_id) + '"' in locked.text
+    assert 'id="carrier_id"' not in locked.text
+    assert "Выберите перевозчика" not in locked.text
+    open_choice = client.get("/vehicles/new")
+    assert 'id="carrier_id"' in open_choice.text
+
+    driver_card = client.get(f"/carriers/{carrier_id}/drivers/{ids['driver_id']}")
+    assert driver_card.status_code == 200
+    assert "Сохранить водителя" in driver_card.text
+    assert "Скан паспорта" in driver_card.text
+    vehicle_card = client.get(f"/carriers/{carrier_id}/vehicles/{ids['vehicle_id']}")
+    assert vehicle_card.status_code == 200
+    assert "Сохранить ТС" in vehicle_card.text
+    assert "Скан СТС" in vehicle_card.text
+    assert client.get(f"/carriers/{carrier_id}/drivers/999999").status_code == 404
+    fleet = client.get("/drivers")
+    assert f'/carriers/{carrier_id}/drivers/{ids["driver_id"]}' in fleet.text
+
+    token = re.search(r'name="csrf" value="([^"]+)"', driver_form.text).group(1)
+    created = client.post(
+        f"/carriers/{carrier_id}/drivers",
+        data={
+            "csrf": token,
+            "carrier_id": str(carrier_id),
+            "name": "Новый Водитель",
+            "birth_date": "1990-01-02",
+            "phone": "+7 903 111-22-33",
+            "passport_series": "45 01",
+            "passport_number": "111222",
+            "passport_issued_by": "ОВД",
+            "passport_issued_at": "2010-05-05",
+            "passport_dept_code": "770-001",
+            "license_series": "77 11",
+            "license_number": "333444",
+            "license_issued_at": "2020-01-01",
+            "license_issued_by": "ГИБДД",
+            "license_valid_until": "2030-01-01",
+            "license_categories": "B, C",
+            "consent": "1",
+        },
+        files={
+            "passport": ("passport.pdf", PDF, "application/pdf"),
+            "license": ("license.pdf", PDF, "application/pdf"),
+        },
+        follow_redirects=False,
+    )
+    assert created.status_code == 303, created.text
+    new_driver = client.app.state.db.one("SELECT id, carrier_id FROM drivers WHERE name = ?", ("Новый Водитель",))
+    assert new_driver["carrier_id"] == carrier_id
+    assert created.headers["location"].endswith(f"/carriers/{carrier_id}/drivers/{new_driver['id']}?note=saved")
+    fresh = client.get(f"/carriers/{carrier_id}")
+    assert "Новый Водитель" in fresh.text
+    detail = client.get(created.headers["location"])
+    assert "passport.pdf" in detail.text
+    assert "license.pdf" in detail.text
+
+    token = re.search(r'name="csrf" value="([^"]+)"', vehicle_form.text).group(1)
+    made = client.post(
+        f"/carriers/{carrier_id}/vehicles",
+        data={
+            "csrf": token,
+            "carrier_id": str(carrier_id),
+            "make_model": "ГАЗель",
+            "body": "тент",
+            "volume": "10 м³",
+            "loading": "задняя",
+            "plate": "А 111 АА 77",
+            "vin": "XTA11111111111111",
+            "sts_series": "77 11",
+            "sts_number": "222333",
+        },
+        files={"sts": ("sts-new.pdf", PDF, "application/pdf")},
+        follow_redirects=False,
+    )
+    assert made.status_code == 303, made.text
+    new_vehicle = client.app.state.db.one("SELECT id, carrier_id FROM vehicles WHERE plate = ?", ("А 111 АА 77",))
+    assert new_vehicle["carrier_id"] == carrier_id
+    assert made.headers["location"].endswith(f"/carriers/{carrier_id}/vehicles/{new_vehicle['id']}?note=saved")
+    assert "sts-new.pdf" in client.get(made.headers["location"]).text
+    assert "А 111 АА 77" in client.get(f"/carriers/{carrier_id}").text
+
+    foreign = client.post(
+        f"/carriers/{carrier_id}/drivers",
+        data={"csrf": token, "carrier_id": str(carrier_id + 99), "name": "Чужой"},
+        follow_redirects=False,
+    )
+    assert foreign.status_code == 303
+    assert "err=fields" in foreign.headers["location"]
+    assert f"add=driver" in foreign.headers["location"]
+
+
 def test_roles_dispatcher_writes_operator_does_not(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setenv("SQLITE_PATH", str(tmp_path / "delo.db"))
@@ -359,6 +476,17 @@ def test_roles_dispatcher_writes_operator_does_not(tmp_path, monkeypatch):
     assert created.status_code == 303, created.text
     assert "err=" not in created.headers["location"]
     assert dispatcher.app.state.db.one("SELECT COUNT(*) AS n FROM carriers")["n"] == 1
+    carrier_id = dispatcher.app.state.db.one("SELECT id FROM carriers")["id"]
+    readonly = operator.get(f"/carriers/{carrier_id}")
+    assert "+ Водитель" not in readonly.text
+    assert "+ Машина" not in readonly.text
+    assert "Водителей пока нет" in readonly.text
+    assert "Машин пока нет" in readonly.text
+    hidden_form = operator.get(f"/carriers/{carrier_id}?add=driver")
+    assert 'name="passport"' not in hidden_form.text
+    writable = dispatcher.get(f"/carriers/{carrier_id}")
+    assert "+ Водитель" in writable.text
+    assert "+ Машина" in writable.text
     expeditor = dispatcher.get("/carriers/expeditor")
     token = re.search(r'name="csrf" value="([^"]+)"', expeditor.text).group(1)
     blocked = dispatcher.post(

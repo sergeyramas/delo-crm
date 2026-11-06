@@ -11,6 +11,10 @@
   <form method="post" action="/vehicles" enctype="multipart/form-data">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <input type="hidden" name="next" value="{{ next or '' }}">
+    {% if locked_carrier %}
+    <input type="hidden" name="carrier_id" value="{{ locked_carrier.id }}">
+    <p class="src">Машина сразу числится у {{ locked_carrier.name }}.</p>
+    {% else %}
     <div class="field">
       <label for="carrier_id">Чей транспорт</label>
       <select id="carrier_id" name="carrier_id" required>
@@ -20,6 +24,7 @@
         {% endfor %}
       </select>
     </div>
+    {% endif %}
     {% with prefix='new', item=none %}{% include "vehicle_fields.html" %}{% endwith %}
     <div class="field">
       <label for="sts">Скан СТС, PDF, JPG или PNG</label>
