@@ -536,7 +536,7 @@ def create_inbound(db: Database, settings: Settings, payload: dict) -> dict:
                 number = existing["number"]
                 status = existing["status"]
                 fill = {}
-                for key in ("route_from", "route_to", "cargo", "weight", "pallets", "load_date", "subject"):
+                for key in ("route_from", "route_to", "cargo", "weight", "pallets", "load_date", "subject", "flags"):
                     if key == "subject":
                         value = subject
                     elif key == "load_date":
@@ -595,11 +595,11 @@ def create_inbound(db: Database, settings: Settings, payload: dict) -> dict:
                 cur = conn.execute(
                     """INSERT INTO packages (
                         number, year, seq, status, stage, client_id, route_from, route_to, cargo, weight, pallets,
-                        rate_rub, load_date, source, source_detail, list_note, subject, thread_id, stage_times_json,
+                        rate_rub, load_date, source, source_detail, list_note, flags, subject, thread_id, stage_times_json,
                         carrier_name, carrier_email, carrier_contract, carrier_party_id,
                         driver_name, driver_channel, plate, vehicle, driver_party_id,
                         created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         number,
                         year,
@@ -617,6 +617,7 @@ def create_inbound(db: Database, settings: Settings, payload: dict) -> dict:
                         source,
                         clean(payload.get("source_detail"), 500),
                         clean(payload.get("list_note"), 300),
+                        clean(payload.get("flags"), 2000),
                         subject,
                         thread_id,
                         touch_stage("{}", stage, moment),

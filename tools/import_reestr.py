@@ -12,6 +12,7 @@ import argparse
 import base64
 import csv
 import io
+import json
 import os
 import re
 import sys
@@ -120,6 +121,55 @@ class Planned:
     payload: dict
     patch: dict | None
     row: int
+    vat: str = ""
+
+
+# Поля, которые шлюз реально пишет. Чужие ключи JSON в POST не кладём.
+INBOUND_KEYS = {
+    "source",
+    "thread_id",
+    "from",
+    "subject",
+    "text",
+    "client_hint",
+    "client_name",
+    "client_email",
+    "client_contact",
+    "client_phone",
+    "client_inn",
+    "client_company",
+    "client_note",
+    "route_from",
+    "route_to",
+    "cargo",
+    "weight",
+    "pallets",
+    "rate_rub",
+    "load_date",
+    "carrier_name",
+    "carrier_email",
+    "carrier_phone",
+    "carrier_inn",
+    "carrier_contract",
+    "carrier_company",
+    "driver_name",
+    "driver_phone",
+    "driver_email",
+    "vehicle",
+    "plate",
+    "license_no",
+    "driver_license",
+    "passport_no",
+    "driver_passport",
+    "driver_channel",
+    "source_detail",
+    "list_note",
+    "flags",
+    "hint",
+    "idempotent",
+}
+PATCH_KEYS = {"status", "stage", "decision", "signed_client", "signed_carrier", "comment", "actor"}
+PREFIX_FILE_RE = re.compile(r"^\d{2}-.+")
 
 
 @dataclass
@@ -209,24 +259,58 @@ def split_route(value: str) -> tuple[str, str]:
     return text[:120], ""
 
 
-def parse_rate(value: str) -> int | None:
-    raw = value.strip().replace("\u00a0", "").replace(" ", "").replace("₽", "")
-    raw = raw.replace("руб.", "").replace("руб", "").replace(",", ".")
-    if raw.endswith("."):
-        raw = raw[:-1]
-    if not raw:
-        return None
+def parse_rate(value: str) -> tuple[int | None, str]:
+    """Число из «30000 без НДС» или «68 000». Суффикс НДС не часть суммы."""
+    original = value.strip()
+    if not original:
+        return None, ""
+    folded = original.lower().replace("ё", "е")
+    suffix = ""
+    if "без ндс" in folded:
+        suffix = "без НДС"
+    elif "с ндс" in folded:
+        suffix = "с НДС"
+    match = re.search(r"(\d(?:[\d\s\u00a0]*\d)?)(?:[.,](\d+))?", original.replace("\u00a0", " "))
+    if not match:
+        raise RowError(f"Ставка не число: {original[:40]}")
+    whole = re.sub(r"[\s\u00a0]", "", match.group(1))
+    frac = match.group(2)
+    raw = whole if not frac else f"{whole}.{frac}"
     if not re.fullmatch(r"\d+(?:\.\d+)?", raw):
-        raise RowError(f"Ставка не число: {value.strip()[:40]}")
+        raise RowError(f"Ставка не число: {original[:40]}")
     number = int(float(raw))
     if number < 0 or number > 100_000_000:
         raise RowError("Ставка вне диапазона.")
-    return number
+    return number, suffix
+
+
+def stamp_vat(payload: dict, suffix: str) -> None:
+    if not suffix:
+        return
+    flags = str(payload.get("flags") or "")
+    if suffix.lower() not in flags.lower():
+        payload["flags"] = f"{flags}; {suffix}".strip("; ") if flags else suffix
+    note = str(payload.get("list_note") or "")
+    if suffix.lower() not in note.lower():
+        joined = f"{note} · {suffix}".strip(" ·") if note else suffix
+        payload["list_note"] = joined[:300]
+
+
+def split_emails(value: str) -> list[str]:
+    found: list[str] = []
+    for part in re.split(r"[,;]+", value or ""):
+        match = re.search(r"[^<>\s,;]+@[^<>\s,;]+", part)
+        if not match:
+            continue
+        email = match.group(0)[:200]
+        if email not in found:
+            found.append(email)
+    return found
 
 
 def one_email(value: str) -> str:
-    match = re.search(r"[^<>\s;]+@[^<>\s;]+", value.strip())
-    return match.group(0)[:200] if match else ""
+    emails = split_emails(value)
+    return emails[0] if emails else ""
 
 
 def carrier_from_komu(komu: str) -> str:
@@ -298,10 +382,13 @@ def build_row(row: dict) -> tuple[dict, dict | None]:
     if client:
         payload["client_name"] = client[:300]
         payload["client_hint"] = client[:300]
-    email_client = one_email(_cell(row, "email_klient"))
+    client_emails = split_emails(_cell(row, "email_klient"))
     email_carrier = one_email(_cell(row, "email_perevozchik"))
-    if email_client:
-        payload["client_email"] = email_client
+    if client_emails:
+        payload["client_email"] = client_emails[0]
+    if len(client_emails) > 1:
+        extra = ", ".join(client_emails[1:])
+        payload["client_note"] = f"Также: {extra}"
     if email_carrier:
         payload["carrier_email"] = email_carrier
     if route_from:
@@ -315,9 +402,11 @@ def build_row(row: dict) -> tuple[dict, dict | None]:
         payload["weight"] = weight[:60]
     if when:
         payload["load_date"] = when
-    rate = parse_rate(_cell(row, "stavka"))
+    rate, vat = parse_rate(_cell(row, "stavka"))
     if rate is not None:
         payload["rate_rub"] = rate
+    stamp_vat(payload, vat)
+    payload["_vat"] = vat
     if driver:
         payload["driver_name"] = driver
     if plate:
@@ -353,8 +442,121 @@ def load_csv(path: Path) -> tuple[list[Planned], list[str]]:
         except RowError as exc:
             errors.append(f"строка {index}: {exc}")
             continue
-        plans.append(Planned(number=payload["number"], payload=payload, patch=patch, row=index))
+        plans.append(Planned(
+            number=payload["number"],
+            payload=payload,
+            patch=patch,
+            row=index,
+            vat=str(payload.get("_vat") or ""),
+        ))
     return plans, errors
+
+
+def _blank(value) -> bool:
+    return value is None or value == "" or value == [] or value == {}
+
+
+def overlay_payload(plan: Planned, extra: dict) -> None:
+    """JSON поверх строки CSV с тем же номером. Пустые поля JSON уже заполненное не затирают."""
+    for key, value in extra.items():
+        if key in {"attachments", "secret", "number", "_vat"}:
+            continue
+        if _blank(value):
+            continue
+        if key in PATCH_KEYS:
+            if plan.patch is None:
+                plan.patch = {"actor": "reestr"}
+            plan.patch[key] = value
+            continue
+        if key in INBOUND_KEYS:
+            plan.payload[key] = value
+    plan.payload["number"] = plan.number
+    plan.payload["idempotent"] = True
+    if plan.payload.get("source") not in {"mail", "tg", "manual"}:
+        plan.payload["source"] = "manual"
+    stamp_vat(plan.payload, plan.vat)
+
+
+def apply_enrichment(plans: list[Planned], objects: list[dict]) -> list[str]:
+    by_number = {plan.number: plan for plan in plans}
+    errors: list[str] = []
+    for obj in objects:
+        if not isinstance(obj, dict):
+            errors.append("payload JSON должен быть объектом.")
+            continue
+        raw_number = str(obj.get("number") or "").strip()
+        if raw_number:
+            try:
+                number = normalize_number(raw_number, str(obj.get("load_date") or ""))
+            except RowError as exc:
+                errors.append(str(exc))
+                continue
+            plan = by_number.get(number)
+            if plan is None:
+                errors.append(f"payload {number} не совпал со строкой CSV.")
+                continue
+        elif len(plans) == 1:
+            plan = plans[0]
+        else:
+            errors.append("payload без number при нескольких строках CSV.")
+            continue
+        overlay_payload(plan, obj)
+    return errors
+
+
+def load_enrichment(explicit: list[str], csv_path: Path) -> tuple[list[dict], dict[str, str], list[str]]:
+    """Объекты JSON и карта имя-файла → номер. Sidecar: payload-*.json рядом с CSV."""
+    paths: list[Path] = []
+    seen: set[str] = set()
+
+    def push(path: Path) -> None:
+        if not path.is_file():
+            return
+        key = str(path.resolve())
+        if key in seen:
+            return
+        seen.add(key)
+        paths.append(path)
+
+    for raw in explicit:
+        item = Path(raw)
+        if item.is_dir():
+            for child in sorted(item.glob("*.json")):
+                push(child)
+        else:
+            push(item)
+    for child in sorted(csv_path.parent.glob("payload-*.json")):
+        push(child)
+    objects: list[dict] = []
+    owners: dict[str, str] = {}
+    errors: list[str] = []
+    for path in paths:
+        try:
+            parsed = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            errors.append(f"Не разобран JSON: {path.name}")
+            continue
+        batch = parsed if isinstance(parsed, list) else [parsed]
+        for obj in batch:
+            if not isinstance(obj, dict):
+                errors.append(f"В {path.name} нужен объект.")
+                continue
+            raw_number = str(obj.get("number") or "").strip()
+            number = ""
+            if raw_number:
+                try:
+                    number = normalize_number(raw_number, str(obj.get("load_date") or ""))
+                except RowError as exc:
+                    errors.append(f"{path.name}: {exc}")
+                    continue
+            objects.append(obj)
+            for item in obj.get("attachments") or []:
+                if not isinstance(item, dict):
+                    continue
+                name = item.get("name") or (Path(str(item["path"])).name if item.get("path") else "")
+                if name and number:
+                    owners[Path(str(name)).name] = number
+    return objects, owners, errors
 
 
 def number_from_filename(name: str) -> str | None:
@@ -370,7 +572,36 @@ def number_from_filename(name: str) -> str | None:
         return None
 
 
-def collect_attachments(docs_dir: str | None, pairs: list[str]) -> list[Attachment]:
+def _sole_number(numbers: list[str] | None) -> str:
+    uniq = list(dict.fromkeys(numbers or []))
+    return uniq[0] if len(uniq) == 1 else ""
+
+
+def assign_doc_number(name: str, numbers: list[str] | None, owners: dict[str, str] | None) -> tuple[str, str]:
+    """Номер пакета для файла или текст ошибки. Пустой номер — файл не из этой сделки."""
+    owners = owners or {}
+    base = Path(name).name
+    explicit = number_from_filename(base)
+    if explicit:
+        return explicit, ""
+    if base in owners:
+        return owners[base], ""
+    if PREFIX_FILE_RE.match(base):
+        sole = _sole_number(numbers)
+        if sole:
+            return sole, ""
+        if not numbers:
+            return "", f"Файл {base} не привязан: в CSV нет номера."
+        return "", f"Файл {base} не привязан: в CSV несколько номеров, нужен --payload-json."
+    return "", ""
+
+
+def collect_attachments(
+    docs_dir: str | None,
+    pairs: list[str],
+    numbers: list[str] | None = None,
+    owners: dict[str, str] | None = None,
+) -> list[Attachment]:
     found: list[Attachment] = []
     seen: set[tuple[str, str]] = set()
 
@@ -381,9 +612,19 @@ def collect_attachments(docs_dir: str | None, pairs: list[str]) -> list[Attachme
         seen.add(key)
         found.append(Attachment(number=number, path=path, error=error))
 
+    sole = _sole_number(numbers)
     for item in pairs:
         if "=" not in item:
-            add("", Path(item), "Флаг --attach ждёт number=path.")
+            path = Path(item)
+            number, error = assign_doc_number(path.name, numbers, owners)
+            if error:
+                add("", path, error)
+            elif number:
+                add(number, path)
+            elif sole:
+                add(sole, path)
+            else:
+                add("", path, "Флаг --attach без номера: укажите number=path или один номер в CSV.")
             continue
         raw_number, raw_path = item.split("=", 1)
         path = Path(raw_path)
@@ -401,8 +642,10 @@ def collect_attachments(docs_dir: str | None, pairs: list[str]) -> list[Attachme
             for path in sorted(root.rglob("*")):
                 if not path.is_file() or path.name.startswith("."):
                     continue
-                number = number_from_filename(path.name)
-                if number:
+                number, error = assign_doc_number(path.name, numbers, owners)
+                if error:
+                    add("", path, error)
+                elif number:
                     add(number, path)
     ready: list[Attachment] = []
     for item in found:
@@ -447,8 +690,9 @@ def run_import(plans: list[Planned], attachments: list[Attachment], transport, d
                 counters.attached += 1
         return counters
     for plan in plans:
+        body_out = {key: value for key, value in plan.payload.items() if not str(key).startswith("_")}
         try:
-            status, body = transport("POST", "/s/inbound/doc", plan.payload)
+            status, body = transport("POST", "/s/inbound/doc", body_out)
         except SyncError as exc:
             counters.fail(f"строка {plan.row}: {exc.message}")
             continue
@@ -558,8 +802,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("csv_path", help="CSV с разделителем «;»")
     parser.add_argument("--base-url", default=os.environ.get("DELO_CRM_URL", "").strip() or "http://127.0.0.1:8091")
     parser.add_argument("--secret-file", help="Файл с секретом или env-файл с INBOUND_SECRET")
-    parser.add_argument("--attach", action="append", default=[], metavar="NUMBER=PATH")
-    parser.add_argument("--docs-dir", help="Каталог файлов Д-ГГГГ-NNNN-*.pdf")
+    parser.add_argument("--attach", action="append", default=[], metavar="NUMBER=PATH|PATH")
+    parser.add_argument("--docs-dir", help="Каталог файлов Д-ГГГГ-NNNN-* или 01-имя, 02-имя, …")
+    parser.add_argument(
+        "--payload-json",
+        action="append",
+        default=[],
+        metavar="FILE",
+        help="JSON заявки поверх строки CSV с тем же number. Рядом с CSV ещё читаются payload-*.json",
+    )
     parser.add_argument("--connect", default=os.environ.get("DELO_CRM_CONNECT", "").strip(), help="TCP-адрес, если URL — живое имя, а /s/ открыт только с loopback")
     parser.add_argument("--timeout", type=float, default=60)
     parser.add_argument("--dry-run", action="store_true", help="Разобрать CSV и посчитать план, без запросов")
@@ -571,7 +822,12 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     try:
         plans, row_errors = load_csv(path)
-        attachments = collect_attachments(args.docs_dir, args.attach)
+        objects, owners, enrich_errors = load_enrichment(args.payload_json, path)
+        row_errors.extend(enrich_errors)
+        row_errors.extend(apply_enrichment(plans, objects))
+        known = {plan.number for plan in plans}
+        owners = {name: number for name, number in owners.items() if number in known}
+        attachments = collect_attachments(args.docs_dir, args.attach, [plan.number for plan in plans], owners)
     except RowError as exc:
         print(str(exc), file=sys.stderr)
         print(Counters(errors=1).line())

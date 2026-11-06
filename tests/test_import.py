@@ -12,13 +12,17 @@ from fastapi.testclient import TestClient
 
 from app.sync_client import SyncError, patch_package, post_inbound, request_json
 from tools.import_reestr import (
+    apply_enrichment,
     build_row,
     carrier_from_komu,
     collect_attachments,
     load_csv,
+    load_enrichment,
     main,
+    parse_rate,
     registry_target,
     run_import,
+    split_emails,
     split_route,
 )
 
@@ -275,6 +279,155 @@ def test_sync_client_hides_secret_and_patches_number():
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_rate_suffix_and_split_emails():
+    amount, suffix = parse_rate("30000 без НДС")
+    assert amount == 30000
+    assert suffix == "без НДС"
+    assert parse_rate("30000 с НДС") == (30000, "с НДС")
+    assert parse_rate("68 000") == (68000, "")
+    payload, _patch = build_row({
+        "skvoznoj_n": "Д-2026-0001",
+        "data": "19.10.2026",
+        "klient": "ООО ПЕКИН",
+        "marshrut": "Ульяновск → Нефтекамск",
+        "gruz": "Кронштейны",
+        "stavka": "30000 без НДС",
+        "status": "otpravleno",
+        "email_klient": "teksapsan@mail.ru,info@pekin.su",
+        "komu": "ИП Камалюков",
+        "kommentarij": "",
+    })
+    assert payload["rate_rub"] == 30000
+    assert "без НДС" in payload["flags"]
+    assert "без НДС" in payload["list_note"]
+    assert payload["client_email"] == "teksapsan@mail.ru"
+    assert "info@pekin.su" in payload["client_note"]
+    assert payload["carrier_name"] == "Перевозчик 21"
+    assert split_emails("a@example.ru; b@example.ru") == ["a@example.ru", "b@example.ru"]
+
+
+def test_docs_dir_prefix_and_payload_merge(tmp_path, monkeypatch, capsys):
+    def boom(*_args, **_kwargs):
+        raise AssertionError("сеть")
+
+    monkeypatch.setattr("tools.import_reestr.request_json", boom)
+    csv_path = tmp_path / "reestr.csv"
+    csv_path.write_text(
+        "skvoznoj_n;data;klient;marshrut;gruz;stavka;status;email_klient;email_perevozchik;komu;kommentarij\n"
+        "Д-2026-0001;19.10.2026;ООО ПЕКИН;Ульяновск → Нефтекамск;Кронштейны;30000 без НДС;otpravleno;"
+        "teksapsan@mail.ru,info@pekin.su;;;\n",
+        encoding="utf-8",
+    )
+    docs = tmp_path / "files"
+    docs.mkdir()
+    names = [
+        "01-zayavka-5594-source.pdf",
+        "02-kartochka-perevozchika.docx",
+        "03-zayavka-5594-signed.pdf",
+        "04-zayavka-5594-mirror.pdf",
+    ]
+    for name in names:
+        (docs / name).write_bytes(b"%PDF-1")
+    payload = {
+        "number": "Д-2026-0001",
+        "driver_name": "Камалюков Руслан Шеукатович",
+        "driver_phone": "+7 937 957-78-89",
+        "driver_license": "99 21 658130",
+        "driver_passport": "97 17 310968",
+        "vehicle": "ЛУИДОР 3010GD, грузовой бортовой, 2020",
+        "plate": "К 960 СА 21",
+        "carrier_inn": "210801294280",
+        "carrier_name": "Перевозчик 21",
+        "carrier_email": "",
+        "flags": "оплата по оригиналам",
+        "client_note": "Также info@pekin.su (reestr email_klient).",
+        "decision": "berem",
+        "attachments": [{"name": name} for name in names],
+    }
+    payload_path = tmp_path / "payload-Д-2026-0001.json"
+    payload_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    plans, errors = load_csv(csv_path)
+    objects, owners, enrich_errors = load_enrichment([str(payload_path)], csv_path)
+    assert errors == []
+    assert enrich_errors == []
+    assert apply_enrichment(plans, objects) == []
+    body = plans[0].payload
+    assert body["driver_name"] == "Камалюков Руслан Шеукатович"
+    assert body["vehicle"].startswith("ЛУИДОР")
+    assert body["plate"] == "К 960 СА 21"
+    assert body["carrier_inn"] == "210801294280"
+    assert body["rate_rub"] == 30000
+    assert "оплата по оригиналам" in body["flags"]
+    assert "без НДС" in body["flags"]
+    assert "info@pekin.su" in body["client_note"]
+    assert "attachments" not in body
+    assert owners["02-kartochka-perevozchika.docx"] == "Д-2026-0001"
+    assert plans[0].patch["decision"] == "berem"
+    assert plans[0].patch["stage"] == "docs_sent"
+    code = main([
+        str(csv_path),
+        "--dry-run",
+        "--base-url",
+        "http://127.0.0.1:9",
+        "--docs-dir",
+        str(docs),
+        "--payload-json",
+        str(payload_path),
+    ])
+    captured = capsys.readouterr()
+    assert code == 0, captured.err
+    assert captured.out.strip() == "created=1 updated=0 attached=4 errors=0"
+    ambiguous = collect_attachments(str(docs), [], ["Д-2026-0001", "Д-2026-0002"], {})
+    assert ambiguous and all(item.error for item in ambiguous)
+    mapped = collect_attachments(str(docs), [], ["Д-2026-0001", "Д-2026-0002"], owners)
+    assert len(mapped) == 4
+    assert {item.number for item in mapped} == {"Д-2026-0001"}
+    assert all(not item.error for item in mapped)
+
+
+def test_merged_payload_reaches_card(client, tmp_path):
+    csv_path = tmp_path / "reestr.csv"
+    csv_path.write_text(
+        "skvoznoj_n;data;klient;marshrut;gruz;stavka;status;email_klient;email_perevozchik;komu;kommentarij\n"
+        "Д-2026-0001;19.10.2026;ООО ПЕКИН;Ульяновск → Нефтекамск;Кронштейны;30000 без НДС;otpravleno;"
+        "teksapsan@mail.ru,info@pekin.su;;;\n",
+        encoding="utf-8",
+    )
+    payload_path = tmp_path / "payload-Д-2026-0001.json"
+    payload_path.write_text(json.dumps({
+        "number": "Д-2026-0001",
+        "driver_name": "Камалюков Руслан Шеукатович",
+        "driver_license": "99 21 658130",
+        "driver_passport": "97 17 310968",
+        "vehicle": "ЛУИДОР 3010GD, грузовой бортовой, 2020",
+        "plate": "К 960 СА 21",
+        "carrier_inn": "210801294280",
+        "carrier_name": "Перевозчик 21",
+        "flags": "оплата по оригиналам",
+        "client_note": "Также info@pekin.su (reestr email_klient).",
+    }, ensure_ascii=False), encoding="utf-8")
+    plans, errors = load_csv(csv_path)
+    objects, _owners, enrich_errors = load_enrichment([], csv_path)
+    assert errors == [] and enrich_errors == []
+    assert apply_enrichment(plans, objects) == []
+    outcome = run_import(plans, [], ClientTransport(client), dry_run=False)
+    assert outcome.line() == "created=1 updated=0 attached=0 errors=0"
+    package = client.get("/s/packages/Д-2026-0001", headers={"X-Inbound-Secret": SECRET}).json()["package"]
+    assert package["driver_name"] == "Камалюков Руслан Шеукатович"
+    assert package["plate"] == "К 960 СА 21"
+    assert package["vehicle"].startswith("ЛУИДОР")
+    assert package["rate_rub"] == 30000
+    assert package["status"] == "otpravleno"
+    assert package["stage"] == "docs_sent"
+    assert "без НДС" in package["flags"]
+    assert "оплата по оригиналам" in package["flags"]
+    assert package["client"]["email"] == "teksapsan@mail.ru"
+    assert "info@pekin.su" in package["client"]["note"]
+    assert package["carrier_party"]["inn"] == "210801294280"
+    assert package["driver_party"]["license_no"] == "99 21 658130"
+    assert package["driver_party"]["passport_no"] == "97 17 310968"
 
 
 def test_docs_point_at_live_host_without_secrets():
