@@ -45,6 +45,10 @@ TEXT_LIMITS = {
     "cargo": 300,
     "weight": 60,
     "pallets": 60,
+    "cargo_volume": 80,
+    "load_window": 120,
+    "payment_terms": 500,
+    "shipper_contact": 300,
     "source_detail": 500,
     "list_note": 300,
     "hint": 300,
@@ -270,6 +274,13 @@ def _package_public(row: dict, client: dict | None, carrier_party: dict | None =
         "refusal_comment": row["refusal_comment"],
         "signed_client": bool(row["signed_client"]),
         "signed_carrier": bool(row["signed_carrier"]),
+        "carrier_id": row.get("carrier_id"),
+        "vehicle_id": row.get("vehicle_id"),
+        "driver_id": row.get("driver_id"),
+        "cargo_volume": row.get("cargo_volume") or "",
+        "load_window": row.get("load_window") or "",
+        "payment_terms": row.get("payment_terms") or "",
+        "shipper_contact": row.get("shipper_contact") or "",
         "client": _client_public(client),
         "carrier_party": carrier_party,
         "driver_party": driver_party,
@@ -790,6 +801,10 @@ def apply_patch(db: Database, settings: Settings, key: str, payload: dict) -> di
             )
             if new_status != old_status:
                 notify_pair = (old_status, new_status)
+        from app.tracks import sync_from_package
+
+        fresh = dict(conn.execute("SELECT * FROM packages WHERE id = ?", (package["id"],)).fetchone())
+        sync_from_package(conn, fresh, moment, payload)
         snapshot = detail(conn, str(package["id"]))
     if notify_pair and snapshot:
         maybe_notify(settings, snapshot["package"], notify_pair[0], notify_pair[1])
@@ -850,14 +865,9 @@ def file_path(db: Database, file_id: int) -> tuple[Path, str]:
     row = db.one("SELECT * FROM files WHERE id = ?", (file_id,))
     if not row:
         raise ApiError(404, "Файл не найден.")
-    stored = row["stored_name"]
-    if "/" in stored or "\\" in stored or stored.startswith("."):
-        raise ApiError(404, "Файл не найден.")
-    root = (db.data_dir / "files").resolve()
-    path = (root / stored).resolve()
-    if root != path.parent or not path.is_file():
-        raise ApiError(404, "Файл не найден.")
-    return path, row["original_name"]
+    from app.scans import resolve_under_files
+
+    return resolve_under_files(db.data_dir, row["stored_name"]), row["original_name"]
 
 
 def add_task(db: Database, package_key: str, title: str, bucket: str, due_label: str, assignee: str) -> dict:

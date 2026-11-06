@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}ATI Delivery · CRM — добавить машину{% endblock %}
+{% block body %}
+<div class="card">
+  <div class="mut"><a href="/vehicles">← Машины</a></div>
+  <h1>Добавить машину</h1>
+  <p class="mut">Поля ТС и скан СТС — на этой же форме.</p>
+  {% if not carriers %}
+  <p class="gate">Сначала нужен перевозчик. <a href="/carriers/new">+ Добавить перевозчика</a></p>
+  {% else %}
+  <form method="post" action="/vehicles" enctype="multipart/form-data">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="next" value="{{ next or '' }}">
+    <div class="field">
+      <label for="carrier_id">Чей транспорт</label>
+      <select id="carrier_id" name="carrier_id" required>
+        <option value="">Выберите перевозчика</option>
+        {% for item in carriers %}
+        <option value="{{ item.id }}" {% if carrier_id == item.id %}selected{% endif %}>{{ item.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    {% with prefix='new', item=none %}{% include "vehicle_fields.html" %}{% endwith %}
+    <div class="field">
+      <label for="sts">Скан СТС, PDF, JPG или PNG</label>
+      <input id="sts" name="sts" type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png">
+    </div>
+    {% if can_write %}<p><button class="btn" type="submit">+ Добавить машину</button></p>{% endif %}
+  </form>
+  {% endif %}
+</div>
+{% endblock %}

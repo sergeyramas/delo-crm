@@ -8,7 +8,7 @@ from pathlib import Path
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Request
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from app.domain import (
@@ -95,6 +95,10 @@ ERRS = {
     "write": "Не удалось записать сообщение.",
     "party": "Карточка не найдена.",
     "scan": "Не удалось принять скан. Нужен PDF, JPG или PNG до 12 МБ, и только на карточке водителя.",
+    "role": "Этой роли действие недоступно.",
+    "carrier": "Проверьте карточку перевозчика.",
+    "haul": "Не удалось записать связку. Проверьте перевозчика, ТС и водителя.",
+    "gap": "Сначала выберите перевозчика, ТС и водителя.",
 }
 
 WROTE = {
@@ -102,6 +106,10 @@ WROTE = {
     "not_sent": "Наружу ничего не ушло. Черновик лежит в этой карточке.",
     "checked": "Отметки мессенджеров обновлены.",
     "scan": "Скан записан на диск CRM. В заявку он сам не подставляется.",
+    "assigned": "Связка записана. Наружу ничего не ушло.",
+    "assembled": "Карточка перевозчика собрана в пакете. Письмо и MAX не отправлялись.",
+    "saved": "Сохранено.",
+    "nego": "Заметка переговоров записана.",
 }
 
 
@@ -129,6 +137,24 @@ def actor_name(request: Request) -> str:
     return request.app.state.settings.display_name
 
 
+def grants(request: Request) -> dict:
+    user = getattr(request.state, "user", None)
+    if user is None:
+        return {"can_write": True, "can_admin": True}
+    role = user.get("role_code") or ""
+    return {"can_write": role in {"admin", "dispatcher"}, "can_admin": role == "admin"}
+
+
+def require_writer(request: Request) -> None:
+    if not grants(request)["can_write"]:
+        raise ApiError(403, "role")
+
+
+def require_admin(request: Request) -> None:
+    if not grants(request)["can_admin"]:
+        raise ApiError(403, "role")
+
+
 def base_ctx(request: Request, active: str, current_id: int | None = None) -> dict:
     db = request.app.state.db
     if current_id is None:
@@ -138,12 +164,15 @@ def base_ctx(request: Request, active: str, current_id: int | None = None) -> di
         who = f"{user['display_name']} · {role_label(user['role_code'])}"
     else:
         who = request.app.state.settings.display_name
+    access = grants(request)
     return {
         "request": request,
         "active": active,
         "who": who,
         "csrf": request.state.csrf,
         "current_id": current_id,
+        "can_write": access["can_write"],
+        "can_admin": access["can_admin"],
         "err": ERRS.get(request.query_params.get("err", ""), ""),
         "note": WROTE.get(request.query_params.get("note", ""), ""),
         "stages": STAGES,
@@ -342,8 +371,35 @@ def page_card(request: Request, key: str):
         "docs": _docs(db, package["id"]),
         "driver_scans": driver_scan_view(db, package.get("driver_party_id")),
         "org_card": org_card_brief(db, package["id"]),
+        "haul": _haul(request, package),
+        "tracks": _tracks(request, package),
+        "linked": _linked(request, package),
     })
     return templates.TemplateResponse(request, "card.html", ctx)
+
+
+def _haul(request: Request, package: dict) -> dict:
+    from app.carriers import haul_view
+
+    return haul_view(
+        request.app.state.db,
+        package,
+        request.query_params.get("haul", ""),
+        request.query_params.get("client", ""),
+    )
+
+
+def _linked(request: Request, package: dict) -> list:
+    from app.carriers import package_linked_files
+
+    with request.app.state.db.tx() as conn:
+        return package_linked_files(conn, package)
+
+
+def _tracks(request: Request, package: dict) -> dict:
+    from app.tracks import track_view
+
+    return track_view(request.app.state.db, package)
 
 
 @router.get("/packages/{key}/feed")
@@ -432,6 +488,10 @@ async def update_form(request: Request, key: str):
         "cargo": _form_last(form, "cargo"),
         "weight": _form_last(form, "weight"),
         "pallets": _form_last(form, "pallets"),
+        "cargo_volume": _form_last(form, "cargo_volume"),
+        "load_window": _form_last(form, "load_window"),
+        "payment_terms": _form_last(form, "payment_terms"),
+        "shipper_contact": _form_last(form, "shipper_contact"),
         "load_date": _form_last(form, "load_date"),
         "rate_rub": _form_last(form, "rate_rub"),
         "carrier_rate_rub": _form_last(form, "carrier_rate_rub"),

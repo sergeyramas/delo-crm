@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}ATI Delivery · CRM — новый перевозчик{% endblock %}
+{% block body %}
+<div class="card">
+  <div class="mut"><a href="/carriers">← Перевозчики</a></div>
+  <h1>Добавить перевозчика</h1>
+  <p class="mut">Реквизиты и скан документа — на этой же форме.</p>
+  <form method="post" action="/carriers" enctype="multipart/form-data">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="next" value="{{ next or '' }}">
+    {% include "carrier_fields.html" %}
+    <div class="field">
+      <label for="doc">Документ, скан PDF, JPG или PNG</label>
+      <input id="doc" name="doc" type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png">
+    </div>
+    <p><button class="btn" type="submit" {% if not can_write %}disabled{% endif %}>+ Добавить перевозчика</button></p>
+  </form>
+</div>
+{% endblock %}

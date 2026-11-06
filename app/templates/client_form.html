@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}ATI Delivery · CRM — добавить заказчика{% endblock %}
+{% block body %}
+<div class="card">
+  <div class="mut"><a href="/clients">← Заказчики</a></div>
+  <h1>Добавить заказчика</h1>
+  <p class="mut">Реквизиты и скан документа — на этой же форме.</p>
+  <form method="post" action="/clients" enctype="multipart/form-data">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="next" value="{{ next or '' }}">
+    <div class="fields">
+      <div class="field"><label for="name">Наименование</label><input id="name" name="name" type="text" required maxlength="300" autocomplete="organization"></div>
+      <div class="field"><label for="contact_name">Контакт</label><input id="contact_name" name="contact_name" type="text" maxlength="200" autocomplete="name"></div>
+      <div class="field"><label for="company">Компания</label><input id="company" name="company" type="text" maxlength="300" autocomplete="organization"></div>
+      <div class="field"><label for="phone">Телефон</label><input id="phone" name="phone" type="tel" maxlength="80" autocomplete="tel"></div>
+      <div class="field"><label for="email">E-mail</label><input id="email" name="email" type="email" maxlength="200" autocomplete="off"></div>
+      <div class="field"><label for="inn">ИНН</label><input id="inn" name="inn" type="text" inputmode="numeric" maxlength="20" autocomplete="off"></div>
+      <div class="field wide"><label for="note">Заметка</label><textarea id="note" name="note" maxlength="2000"></textarea></div>
+      <div class="field">
+        <label for="doc">Документ, скан PDF, JPG или PNG</label>
+        <input id="doc" name="doc" type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png">
+      </div>
+    </div>
+    {% if can_write %}<p><button class="btn" type="submit">+ Добавить заказчика</button></p>{% endif %}
+  </form>
+</div>
+{% endblock %}

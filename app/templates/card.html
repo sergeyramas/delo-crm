@@ -28,6 +28,130 @@
   </div>
   {% endif %}
 </div>
+<div class="card" id="haul">
+  <h2>Кто везёт</h2>
+  <p class="mut">Выбор из списков. «+ новый» открывает ту же форму, что кнопки в меню: поля и сканы вместе. Сканы выбранных карточек сами появляются в пакете документов. Наружу ничего не уходит.</p>
+  <p class="src">Заказчик</p>
+  <form class="status-form" method="get" action="/packages/{{ p.id }}#haul">
+    <div class="field">
+      <label for="client-q">Поиск заказчика</label>
+      <input id="client-q" name="client" type="search" value="{{ haul.client_q }}" placeholder="Название, ИНН или телефон" maxlength="80">
+    </div>
+    <button class="btn" type="submit">Найти</button>
+  </form>
+  <div class="haul" role="group" aria-label="Заказчики">
+    {% for item in haul.clients %}
+    <form method="post" action="/packages/{{ p.id }}/client">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="client_id" value="{{ item.id }}">
+      <button class="f {% if item.selected %}on{% endif %}" type="submit" {% if not can_write %}disabled{% endif %}>{{ item.name }}</button>
+    </form>
+    {% endfor %}
+    {% if can_write %}<a class="btn" href="/clients/new?next=/packages/{{ p.id }}">+ новый</a>{% endif %}
+  </div>
+  <form class="status-form" method="get" action="/packages/{{ p.id }}#haul">
+    <div class="field">
+      <label for="haul-q">Поиск перевозчика</label>
+      <input id="haul-q" name="haul" type="search" value="{{ haul.q }}" placeholder="ФИО, ИНН или телефон" maxlength="80">
+    </div>
+    <button class="btn" type="submit">Найти</button>
+  </form>
+  <p class="src">Перевозчик</p>
+  <div class="haul" role="group" aria-label="Перевозчики">
+    {% for item in haul.carriers %}
+    <form method="post" action="/packages/{{ p.id }}/assign">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      {% if haul.q %}<input type="hidden" name="haul" value="{{ haul.q }}">{% endif %}
+      <input type="hidden" name="carrier_id" value="{{ item.id }}">
+      <button class="f {% if item.selected %}on{% endif %}" type="submit" {% if not can_write %}disabled{% endif %}>{{ item.name }}</button>
+    </form>
+    {% endfor %}
+    {% if can_write %}<a class="btn" href="/carriers/new?next=/packages/{{ p.id }}">+ новый</a>{% endif %}
+  </div>
+  <p class="src">Машина{% if haul.carrier %} · {{ haul.carrier.name }}{% endif %}</p>
+  <div class="haul" role="group" aria-label="Транспорт">
+    {% for item in haul.vehicles %}
+    <form method="post" action="/packages/{{ p.id }}/assign">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="carrier_id" value="{{ haul.carrier.id }}">
+      <input type="hidden" name="vehicle_id" value="{{ item.id }}">
+      {% if haul.driver %}<input type="hidden" name="driver_id" value="{{ haul.driver.id }}">{% endif %}
+      <button class="f {% if item.selected %}on{% endif %}" type="submit" {% if not can_write %}disabled{% endif %}>{{ item.plate }} · {{ item.make_model[:42] }}</button>
+    </form>
+    {% endfor %}
+    {% if can_write %}<a class="btn" href="/vehicles/new?{% if haul.carrier %}carrier_id={{ haul.carrier.id }}&amp;{% endif %}next=/packages/{{ p.id }}">+ новый</a>{% endif %}
+  </div>
+  <p class="src">Водитель</p>
+  <div class="haul" role="group" aria-label="Водители">
+    {% for item in haul.drivers %}
+    <form method="post" action="/packages/{{ p.id }}/assign">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="carrier_id" value="{{ haul.carrier.id }}">
+      {% if haul.vehicle %}<input type="hidden" name="vehicle_id" value="{{ haul.vehicle.id }}">{% endif %}
+      <input type="hidden" name="driver_id" value="{{ item.id }}">
+      <button class="f {% if item.selected %}on{% endif %}" type="submit" {% if not can_write %}disabled{% endif %}>{{ item.name }}{% if item.user_is_carrier %} · он же перевозчик{% endif %}</button>
+    </form>
+    {% endfor %}
+    {% if can_write %}<a class="btn" href="/drivers/new?{% if haul.carrier %}carrier_id={{ haul.carrier.id }}&amp;{% endif %}next=/packages/{{ p.id }}">+ новый</a>{% endif %}
+  </div>
+  {% if haul.same_person %}<p class="src">Перевозчик и водитель — один человек. В трекере документов у них одна строка.</p>{% endif %}
+  {% if haul.ready %}
+  <p class="ready" role="status">Готово: поля карточки и три скана (СТС, паспорт, ВУ) на месте.</p>
+  {% else %}
+  <div class="gaps" role="status">
+    <b>До сборки не хватает</b>
+    <ul>
+      {% for gap in haul.gaps %}<li>{{ gap }}</li>{% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+  <div class="haul">
+    <form method="post" action="/packages/{{ p.id }}/assemble">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button class="btn" type="submit" {% if not can_write %}disabled{% endif %}>Собрать пакет заказчику</button>
+    </form>
+    <a class="btn ghost" href="/packages/{{ p.id }}/negotiations">Переговоры</a>
+    {% if haul.kartochka_file_id %}
+    <a class="btn ghost" href="/files/{{ haul.kartochka_file_id }}">Скачать PDF карточку</a>
+    {% endif %}
+  </div>
+  <p class="src">«Собрать пакет» пишет PDF в packages/{{ p.number }}/kartochka-perevozchika.pdf и в документы сделки. Сканы в PDF не вшиваются. Письмо заказчику и MAX не отправляются.</p>
+</div>
+<div class="card" id="doc-tracks">
+  <h2>Документы по получателям</h2>
+  <p class="mut">Кто что должен получить по этой заявке. CRM само ничего не шлёт: статус ставится кнопкой или подтягивается из уже лежащего статуса пакета.</p>
+  {% if tracks.merged %}<p class="src">Перевозчик и водитель совпали, поэтому строки объединены.</p>{% endif %}
+  {% for row in tracks.rows %}
+  <div class="doc track-row">
+    <div>
+      <b>{{ row.title }}</b>
+      <div class="mut">{{ row.flow }}</div>
+      <div class="src">Сейчас: {{ row.status_label }}{% if row.when %} · {{ row.when }}{% endif %}</div>
+    </div>
+    <form method="post" action="/packages/{{ p.id }}/tracks" class="track-form">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="recipient" value="{{ row.recipient }}">
+      <div class="field">
+        <label for="channel-{{ row.recipient }}">Канал</label>
+        <select id="channel-{{ row.recipient }}" name="channel">
+          {% for value, label in [('email', 'email'), ('max', 'MAX'), ('email, MAX', 'email + MAX'), ('tg', 'Telegram'), ('crm', 'CRM')] %}
+          <option value="{{ value }}" {% if row.channel == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+          {% if row.channel not in ['email', 'max', 'email, MAX', 'tg', 'crm'] %}
+          <option value="{{ row.channel }}" selected>{{ row.channel }}</option>
+          {% endif %}
+        </select>
+      </div>
+      <div class="haul" role="group" aria-label="Статус для {{ row.title }}">
+        {% for step in row.steps %}
+        <button class="f {% if step.on %}on{% endif %}" type="submit" name="status" value="{{ step.code }}" {% if not can_write %}disabled{% endif %}>{{ step.label }}</button>
+        {% endfor %}
+      </div>
+    </form>
+  </div>
+  {% endfor %}
+  <p class="src">Заказчику «отправлено» ставится из статуса пакета otpravleno (стадия «Документы отправлены»). Подпись заказчика и перевозчика — из флагов сделки. Стадия «Водитель в пути» отмечает водителю «отправлено» по MAX, без реальной отправки. mirror_status и scan_ok принимаются в PATCH пакета и тоже только двигают эту таблицу.</p>
+</div>
 <div class="card">
   <h2>Стадии сделки</h2>
   {% if p.stage == 'otkaz' %}<p class="gate">Отказ. {{ p.refusal_comment }}</p>{% endif %}
@@ -43,7 +167,19 @@
   <div>
     <div class="card">
       <h2>Пакет документов</h2>
-      {% if not docs %}<p class="mut">В пакете пока нет файлов.</p>{% endif %}
+      {% if linked %}
+      <p class="src">Из карточек. Подтянулись сами, заново в сделку грузить не нужно.</p>
+      {% for item in linked %}
+      <div class="doc">
+        <div>
+          <b>{{ item.label }}</b>
+          <div class="mut">{{ item.who }} · {{ item.original_name }}</div>
+        </div>
+        <div><a class="dl" href="/fleet-files/{{ item.id }}">Скачать</a></div>
+      </div>
+      {% endfor %}
+      {% endif %}
+      {% if not docs and not linked %}<p class="mut">В пакете пока нет файлов.</p>{% endif %}
       {% for doc in docs %}
       <div class="doc">
         <div>
@@ -108,7 +244,7 @@
           {% else %}
           <p class="src">Карточка организации не приложена. Она войдёт в пакет заказчику, если файл в сделке назван «Карточка организации».</p>
           {% endif %}
-          <p class="src">В пакет заказчику идут карточка организации, если она уже есть, и загруженные сканы. Письмо CRM не отправляет.</p>
+          <p class="src">Это сканы карточки водителя из заявки (party). Раздел «Перевозчики» хранит СТС на ТС и паспорт с ВУ на своём водителе отдельно. Письмо CRM не отправляет.</p>
         </div>
       </div>
     </div>
@@ -130,7 +266,11 @@
         <div class="field"><label for="route_to">Куда</label><input id="route_to" name="route_to" type="text" value="{{ p.route_to }}" maxlength="120" autocomplete="off"></div>
         <div class="field wide"><label for="cargo">Груз</label><input id="cargo" name="cargo" type="text" value="{{ p.cargo }}" maxlength="300"></div>
         <div class="field"><label for="weight">Вес</label><input id="weight" name="weight" type="text" value="{{ p.weight }}" maxlength="60"></div>
+        <div class="field"><label for="cargo_volume">Объём груза</label><input id="cargo_volume" name="cargo_volume" type="text" value="{{ p.cargo_volume or '' }}" maxlength="80"></div>
         <div class="field"><label for="pallets">Паллеты</label><input id="pallets" name="pallets" type="text" value="{{ p.pallets }}" maxlength="60"></div>
+        <div class="field"><label for="load_window">Окна погрузки</label><input id="load_window" name="load_window" type="text" value="{{ p.load_window or '' }}" maxlength="120"></div>
+        <div class="field"><label for="shipper_contact">Контакт грузоотправителя</label><input id="shipper_contact" name="shipper_contact" type="text" value="{{ p.shipper_contact or '' }}" maxlength="300"></div>
+        <div class="field wide"><label for="payment_terms">Условия оплаты</label><input id="payment_terms" name="payment_terms" type="text" value="{{ p.payment_terms or '' }}" maxlength="500"></div>
         <div class="field"><label for="load_date">Дата погрузки</label><input id="load_date" name="load_date" type="date" value="{{ p.load_date }}"></div>
         <div class="field"><label for="rate_rub">Ставка, ₽</label><input id="rate_rub" name="rate_rub" type="text" inputmode="numeric" value="{{ p.rate_rub if p.rate_rub is not none else '' }}" autocomplete="off"></div>
         <div class="field"><label for="carrier_rate_rub">Ставка перевозчику, ₽</label><input id="carrier_rate_rub" name="carrier_rate_rub" type="text" inputmode="numeric" value="{{ p.carrier_rate_rub if p.carrier_rate_rub is not none else '' }}" autocomplete="off"></div>
