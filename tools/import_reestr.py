@@ -811,7 +811,7 @@ def main(argv: list[str] | None = None) -> int:
         metavar="FILE",
         help="JSON заявки поверх строки CSV с тем же number. Рядом с CSV ещё читаются payload-*.json",
     )
-    parser.add_argument("--connect", default=os.environ.get("DELO_CRM_CONNECT", "").strip(), help="TCP-адрес, если URL — живое имя, а сокет надо открыть на другом IP. На Ядре не нужен")
+    parser.add_argument("--connect", default=os.environ.get("DELO_CRM_CONNECT", "").strip(), help="TCP-адрес, если URL — живое имя. На Ядре через docker-nginx: 127.0.0.1 (порт хоста); внутри контейнера /s/ пускает мост, не этот адрес")
     parser.add_argument("--timeout", type=float, default=60)
     parser.add_argument("--dry-run", action="store_true", help="Разобрать CSV и посчитать план, без запросов")
     args = parser.parse_args(argv)

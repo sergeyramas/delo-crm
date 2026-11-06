@@ -440,6 +440,8 @@ def test_docs_point_at_live_host_without_secrets():
     assert "/data/nginx/user_conf.d/" in readme
     assert "172.18.0.1:8091" in readme
     assert "client_max_body_size 16m" in readme
+    assert "allow 172.18.0.0/16" in readme
+    assert "/etc/nginx/sites-available" in readme
     assert "ИМЯ_КОНТЕЙНЕРА_NGINX_НА_ЯДРЕ" in readme
     assert "sudo cp deploy/nginx-crm" not in readme
     assert "sudo cp deploy/nginx-crm" not in doc
@@ -449,9 +451,16 @@ def test_docs_point_at_live_host_without_secrets():
     assert "server_name crm.77-91-113-64.sslip.io" in nginx
     assert "client_max_body_size 16m" in nginx
     assert "/data/nginx/user_conf.d/" in nginx
-    directive_body = nginx.split("upstream delo_crm", 1)[1]
-    assert "auth_basic" not in directive_body
-    assert "htpasswd" not in directive_body
+    assert "/etc/nginx/sites-available" in nginx
+    gateway, ui = nginx.split("location /s/ {", 1)[1].split("location / {", 1)
+    assert "allow 172.18.0.1;" in gateway
+    assert "allow 172.18.0.0/16;" in gateway
+    assert "allow 127.0.0.1" not in gateway
+    assert "deny all;" in gateway
+    assert "auth_basic off;" in gateway
+    assert "deny all" not in ui
+    assert "auth_basic_user_file" not in nginx
+    assert "delo-crm.htpasswd" not in nginx
     assert obsolete.startswith("# УСТАРЕЛО. НЕ ДЛЯ ЯДРА. НЕ КОПИРОВАТЬ.")
     assert "DELO_CRM_URL" in doc
     assert "DELO_CRM_INBOUND_SECRET" in doc
