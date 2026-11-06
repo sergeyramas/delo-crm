@@ -176,6 +176,7 @@ CREATE TABLE IF NOT EXISTS outbound_messages (
 );
 
 INSERT OR IGNORE INTO roles (code, label) VALUES
+    ('admin', 'Админ'),
     ('dispatcher', 'Диспетчер'),
     ('operator', 'Оператор');
 

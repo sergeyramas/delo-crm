@@ -16,6 +16,7 @@ from app.db import Database
 from app.domain import now_iso
 
 ROLES = {
+    "admin": "Админ",
     "dispatcher": "Диспетчер",
     "operator": "Оператор",
 }
@@ -27,14 +28,14 @@ ACCOUNTS = (
         "display_name": "Сергей",
         "password_env": "DELO_USER_SERGEY_PASSWORD",
         "role_env": "DELO_USER_SERGEY_ROLE",
-        "default_role": "dispatcher",
+        "default_role": "admin",
     },
     {
         "login": "andrey",
         "display_name": "Андрей (логист)",
         "password_env": "DELO_USER_ANDREY_PASSWORD",
         "role_env": "DELO_USER_ANDREY_ROLE",
-        "default_role": "operator",
+        "default_role": "admin",
     },
 )
 
@@ -87,7 +88,7 @@ def sync_users(db: Database) -> None:
     moment = now_iso()
     with db.tx() as conn:
         conn.execute(
-            "INSERT OR IGNORE INTO roles (code, label) VALUES ('dispatcher', 'Диспетчер'), ('operator', 'Оператор')"
+            "INSERT OR IGNORE INTO roles (code, label) VALUES ('admin', 'Админ'), ('dispatcher', 'Диспетчер'), ('operator', 'Оператор')"
         )
         for account in ACCOUNTS:
             role = _role(os.environ.get(account["role_env"], ""), account["default_role"])

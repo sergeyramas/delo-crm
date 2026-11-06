@@ -111,7 +111,9 @@ curl -sS -H "Content-Type: application/json" \
 1. **nginx basic** (так в примере конфига). `AUTH_MODE=proxy`, `UI_GATE_SECRET` пустой. Приложение слушает только loopback, пароль спрашивает nginx (`htpasswd`). С машины на `127.0.0.1:8091` UI открыт тем, у кого есть shell.
 2. **Пароль приложения.** `AUTH_MODE=basic`. Nginx без `auth_basic`. Заголовок `WWW-Authenticate`. `/health` и `/s/*` пароль экрана не спрашивают: шлюз закрыт своим секретом.
 
-Учётки экрана — Сергей (роль `dispatcher`, в шапке «Диспетчер») и Андрей (роль `operator`, «Оператор»). Роли лежат в таблице `roles`. Отдельного ACL по экранам нет: оба видят одни и те же сделки. Это задел, не матрица прав.
+Учётки экрана — Сергей и Андрей, оба с ролью `admin` (в шапке «Админ»). Рядом в таблице `roles` остаются `dispatcher` («Диспетчер») и `operator` («Оператор»). Отдельного ACL по экранам нет: оба видят одни и те же сделки. Это задел, не матрица прав.
+
+На Ядре в `/root/ati/secrets/delo-crm-auth.env` или в `/root/ati/secrets/delo-crm.env` выставить `DELO_USER_SERGEY_ROLE=admin` и `DELO_USER_ANDREY_ROLE=admin`. Пароли не менять.
 
 Пароли только в `/root/ati/secrets/delo-crm-auth.env`. Пустое значение не стирает уже записанный хэш и не пускает в новую базу. В репозитории паролей нет, процесс их не печатает.
 
@@ -191,7 +193,8 @@ sudo install -m 600 /dev/null /root/ati/secrets/delo-crm.env
 sudo install -m 600 /dev/null /root/ati/secrets/delo-crm-auth.env
 # заполнить оба файла на сервере, не из репозитория
 # delo-crm.env — PORT, DATA_DIR, INBOUND_SECRET, AUTH_MODE, NOTIFY_TG, MESSENGER_*
-# delo-crm-auth.env — DELO_USER_SERGEY_PASSWORD, DELO_USER_ANDREY_PASSWORD и роли
+# delo-crm-auth.env — пароли не менять; роли: DELO_USER_SERGEY_ROLE=admin, DELO_USER_ANDREY_ROLE=admin
+# те же две строки роли можно положить в delo-crm.env, если auth-файла с ролями нет
 sudo cp deploy/delo-crm.service /etc/systemd/system/delo-crm.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now delo-crm
@@ -238,9 +241,9 @@ curl -sS -H "Content-Type: application/json" \
 | `MESSENGER_WA_TOKEN` | токен WhatsApp, адаптер не подключён | пусто |
 | `MESSENGER_MAX_TOKEN` | токен MAX, адаптер не подключён | пусто |
 | `DELO_USER_SERGEY_PASSWORD` | пароль Сергея | пусто |
-| `DELO_USER_SERGEY_ROLE` | `dispatcher` или `operator` | `dispatcher` |
+| `DELO_USER_SERGEY_ROLE` | `admin`, `dispatcher` или `operator` | `admin` |
 | `DELO_USER_ANDREY_PASSWORD` | пароль Андрея | пусто |
-| `DELO_USER_ANDREY_ROLE` | `dispatcher` или `operator` | `operator` |
+| `DELO_USER_ANDREY_ROLE` | `admin`, `dispatcher` или `operator` | `admin` |
 
 ## Чего в этой версии нет
 

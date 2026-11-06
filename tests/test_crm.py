@@ -566,19 +566,23 @@ def test_sergey_and_andrey_accounts(tmp_path, monkeypatch):
     sergey = local.get("/", auth=("sergey", "test-sergey-password"))
     assert sergey.status_code == 200
     assert "Сергей" in sergey.text
-    assert "Диспетчер" in sergey.text
+    assert "Админ" in sergey.text
     andrey = local.get("/", auth=("andrey", "test-andrey-password"))
     assert andrey.status_code == 200
     assert "Андрей (логист)" in andrey.text
-    assert "Оператор" in andrey.text
+    assert "Админ" in andrey.text
     assert local.get("/", auth=("sergey", "wrong-password")).status_code == 401
     rows = local.app.state.db.q("SELECT login, role_code, password_hash FROM users ORDER BY login")
     blob = str(rows)
     assert "test-sergey-password" not in blob
     assert "test-andrey-password" not in blob
     by_login = {row["login"]: row for row in rows}
-    assert by_login["sergey"]["role_code"] == "dispatcher"
-    assert by_login["andrey"]["role_code"] == "operator"
+    assert by_login["sergey"]["role_code"] == "admin"
+    assert by_login["andrey"]["role_code"] == "admin"
+    labels = {row["code"]: row["label"] for row in local.app.state.db.q("SELECT code, label FROM roles")}
+    assert labels["admin"] == "Админ"
+    assert labels["dispatcher"] == "Диспетчер"
+    assert labels["operator"] == "Оператор"
     assert by_login["sergey"]["password_hash"].startswith("pbkdf2$")
     assert by_login["andrey"]["password_hash"].startswith("pbkdf2$")
     readme = (ROOT / "README.md").read_text()
