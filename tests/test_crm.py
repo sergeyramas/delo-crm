@@ -602,3 +602,109 @@ def test_validation(client):
     assert _post(client, {"source": "manual"}).status_code == 422
     assert client.get("/s/packages?status=nope", headers={"X-Inbound-Secret": SECRET}).status_code == 422
     assert client.get("/s/packages/999", headers={"X-Inbound-Secret": SECRET}).status_code == 404
+
+
+def test_explicit_number_upsert_and_counter(client):
+    year = date.today().year
+    other = year - 1
+    first = _post(client, {"source": "manual", "text": "живой"})
+    assert first.json()["number"] == f"Д-{year}-0001"
+    imported = _post(client, {
+        "source": "manual",
+        "number": f"Д-{year}-0004",
+        "text": "импорт",
+        "client_name": "ООО «Пример»",
+        "route_from": "Тула",
+    })
+    assert imported.status_code == 200, imported.text
+    body = imported.json()
+    assert body["number"] == f"Д-{year}-0004"
+    assert body["created"] is True
+    again = _post(client, {
+        "source": "manual",
+        "number": f"Д-{year}-0004",
+        "text": "ещё текст",
+        "cargo": "тент",
+        "route_from": "Москва",
+    })
+    assert again.status_code == 200, again.text
+    assert again.json()["created"] is False
+    assert again.json()["id"] == body["id"]
+    card = client.get(f"/s/packages/{body['number']}", headers={"X-Inbound-Secret": SECRET}).json()
+    assert card["package"]["route_from"] == "Тула"
+    assert card["package"]["cargo"] == "тент"
+    assert card["package"]["client"]["name"] == "ООО «Пример»"
+    nxt = _post(client, {"source": "manual", "text": "после импорта"})
+    assert nxt.json()["number"] == f"Д-{year}-0005"
+    low = _post(client, {"source": "manual", "number": f"Д-{year}-0002", "text": "дыра"})
+    assert low.json()["created"] is True
+    assert low.json()["number"] == f"Д-{year}-0002"
+    after = _post(client, {"source": "manual", "text": "не откатился"})
+    assert after.json()["number"] == f"Д-{year}-0006"
+    old = _post(client, {"source": "manual", "number": f"Д-{other}-0003", "text": "прошлый год"})
+    assert old.json()["number"] == f"Д-{other}-0003"
+    assert _post(client, {"source": "manual", "text": "этот год"}).json()["number"] == f"Д-{year}-0007"
+    counter = client.app.state.db.one("SELECT last_seq FROM year_counters WHERE year = ?", (year,))
+    assert counter["last_seq"] == 7
+    other_counter = client.app.state.db.one("SELECT last_seq FROM year_counters WHERE year = ?", (other,))
+    assert other_counter["last_seq"] == 3
+    assert _post(client, {"source": "manual", "number": f"Д-{year}-1", "text": "кривой"}).status_code == 422
+    assert _post(client, {"source": "manual", "number": f"D-{year}-0001", "text": "латиница"}).status_code == 422
+    assert client.app.state.db.one("SELECT COUNT(*) AS n FROM packages WHERE number = ?", (f"Д-{year}-0004",))["n"] == 1
+
+
+def test_idempotent_number_skips_same_event(client):
+    year = date.today().year
+    number = f"Д-{year}-0008"
+    payload = {
+        "source": "manual",
+        "number": number,
+        "text": "один и тот же",
+        "idempotent": True,
+        "client_name": "А",
+    }
+    assert _post(client, payload).json()["created"] is True
+    assert _post(client, payload).json()["created"] is False
+    detail = client.get(f"/s/packages/{number}", headers={"X-Inbound-Secret": SECRET}).json()
+    notes = [event for event in detail["events"] if event["type"] == "note"]
+    assert len(notes) == 1
+    assert client.app.state.db.one("SELECT COUNT(*) AS n FROM packages")["n"] == 1
+
+
+def test_number_does_not_steal_foreign_thread(client):
+    year = date.today().year
+    _post(client, {"source": "mail", "text": "письмо", "thread_id": "thr-a"})
+    clash = _post(client, {
+        "source": "mail",
+        "text": "чужой номер",
+        "thread_id": "thr-a",
+        "number": f"Д-{year}-0009",
+    })
+    assert clash.status_code == 409
+    created = _post(client, {"source": "manual", "text": "номер", "number": f"Д-{year}-0009"}).json()
+    linked = _post(client, {
+        "source": "manual",
+        "text": "привязка",
+        "number": f"Д-{year}-0009",
+        "thread_id": "thr-b",
+    })
+    assert linked.status_code == 200, linked.text
+    assert linked.json()["id"] == created["id"]
+    card = client.get(f"/s/packages/{created['number']}", headers={"X-Inbound-Secret": SECRET}).json()
+    assert card["package"]["thread_id"] == "thr-b"
+    other = _post(client, {
+        "source": "manual",
+        "text": "другой тред",
+        "number": f"Д-{year}-0009",
+        "thread_id": "thr-c",
+    })
+    assert other.status_code == 409
+    stolen = _post(client, {
+        "source": "manual",
+        "text": "чужой тред на этот номер",
+        "number": f"Д-{year}-0009",
+        "thread_id": "thr-a",
+    })
+    assert stolen.status_code == 409
+    kept = client.get(f"/s/packages/{created['number']}", headers={"X-Inbound-Secret": SECRET}).json()
+    assert kept["package"]["thread_id"] == "thr-b"
