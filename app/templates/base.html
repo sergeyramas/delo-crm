@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>{% block title %}ATI Delivery · CRM{% endblock %}</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<a class="skip" href="#main">К содержимому</a>
+<header class="top">
+  <div><b>ATI Delivery · CRM</b></div>
+  <nav class="nav" aria-label="Разделы">
+    <a href="/" {% if active == 'list' %}class="on" aria-current="page"{% endif %}>Список</a>
+    <a href="/kanban" {% if active == 'kanban' %}class="on" aria-current="page"{% endif %}>Воронка</a>
+    {% if current_id %}
+    <a href="/packages/{{ current_id }}" {% if active == 'card' %}class="on" aria-current="page"{% endif %}>Карточка</a>
+    <a href="/packages/{{ current_id }}/feed" {% if active == 'feed' %}class="on" aria-current="page"{% endif %}>Лента</a>
+    {% else %}
+    <a href="/packages" {% if active == 'card' %}class="on" aria-current="page"{% endif %}>Карточка</a>
+    <a href="/packages" {% if active == 'feed' %}class="on" aria-current="page"{% endif %}>Лента</a>
+    {% endif %}
+  </nav>
+  <span class="who">{{ who }}</span>
+</header>
+<main id="main" class="wrap">
+  {% if err %}<div class="banner" role="alert">{{ err }}</div>{% endif %}
+  {% block body %}{% endblock %}
+</main>
+</body>
+</html>

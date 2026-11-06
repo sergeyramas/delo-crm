@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}ATI Delivery · CRM — лента {{ p.number }}{% endblock %}
+{% block body %}
+<div class="card split">
+  <div>
+    <div class="mut"><a href="/packages/{{ p.id }}">← Карточка сделки</a></div>
+    <h1>Лента · {{ p.number }} · {{ p.route_label }}</h1>
+    <span class="mut">письма, Telegram, шаги и файлы в одном месте. Отправки наружу отсюда нет.</span>
+  </div>
+  <span class="chip {{ p.stage_class }}">{{ p.stage_label }}</span>
+</div>
+<div class="card">
+  <div class="filters">
+    {% for item in filters %}
+    <a class="f {{ item.class }} {% if item.on %}is-on{% endif %}" href="/packages/{{ p.id }}/feed?kind={{ item.code }}">{{ item.label }} · {{ item.count }}</a>
+    {% endfor %}
+  </div>
+</div>
+<div class="card">
+  {% for event in events %}
+  <article class="msg {{ event.css }}">
+    <b>{{ event.heading }}</b>
+    <span class="mut">{{ event.when }}{% if event.actor %} · {{ event.actor }}{% endif %}</span><br>
+    {{ event.text }}
+    {% if event.attachments %}
+    <div class="src">
+      {% for file in event.attachments %}
+        {% if file.file_id %}<a class="dl" href="/files/{{ file.file_id }}">{{ file.name }}</a>{% else %}{{ file.name }}{% if file.url %} · ссылка сохранена, CRM её не открывает{% endif %}{% endif %}
+      {% endfor %}
+    </div>
+    {% endif %}
+  </article>
+  {% else %}
+  <p class="mut">В этом фильтре пусто.</p>
+  {% endfor %}
+</div>
+<div class="card">
+  <h2>Заметка в ленту</h2>
+  <form method="post" action="/packages/{{ p.id }}/note">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="back" value="/packages/{{ p.id }}/feed?kind={{ kind }}">
+    <div class="field"><label for="feed-title">Заголовок</label><input id="feed-title" name="title" type="text" maxlength="200"></div>
+    <div class="field"><label for="feed-text">Текст</label><textarea id="feed-text" name="text" required maxlength="8000"></textarea></div>
+    <p><button class="btn" type="submit">Записать</button></p>
+  </form>
+</div>
+{% endblock %}

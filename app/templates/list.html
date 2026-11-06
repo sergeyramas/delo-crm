@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}ATI Delivery · CRM — список сделок{% endblock %}
+{% block body %}
+<div class="kpis">
+  <div class="card"><div class="mut">Сделок в работе</div><div class="kpi">{{ kpis.in_work }}</div></div>
+  <div class="card"><div class="mut">Ждут «да» Сергея</div><div class="kpi">{{ kpis.waiting_yes }}</div></div>
+  <div class="card"><div class="mut">Ждут подписи</div><div class="kpi">{{ kpis.waiting_sign }}</div></div>
+  <div class="card"><div class="mut">Сумма ставок</div><div class="kpi">{{ kpis.rate_sum }}</div></div>
+</div>
+<div class="card">
+  <h2>Список сделок</h2>
+  <div class="filters">
+    <a class="f {% if not stage %}on{% endif %}" href="{{ stage_href('', status) }}">Все · {{ all_count }}</a>
+    {% for item in stages %}
+    <a class="f st-{{ item.code }} {% if stage == item.code %}is-on{% endif %}" href="{{ stage_href(item.code, status) }}">{{ item.label }} · {{ counts.get(item.code, 0) }}</a>
+    {% endfor %}
+    <a class="f st-otkaz {% if stage == 'otkaz' %}is-on{% endif %}" href="{{ stage_href('otkaz', status) }}">Отказ · {{ counts.get('otkaz', 0) }}</a>
+  </div>
+  <form class="status-form" method="get" action="/">
+    {% if stage %}<input type="hidden" name="stage" value="{{ stage }}">{% endif %}
+    <div class="field">
+      <label for="status">Статус пакета</label>
+      <select id="status" name="status">
+        <option value="">все статусы</option>
+        {% for item in statuses %}
+        <option value="{{ item.code }}" {% if status == item.code %}selected{% endif %}>{{ item.label }} · {{ item.code }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <button class="btn" type="submit">Показать</button>
+  </form>
+</div>
+<div class="card">
+  {% if not rows %}
+  <p>Пакетов с таким фильтром нет. Новый пакет создаётся через <code>POST /s/inbound/doc</code> — из CRM письмо никому не уходит.</p>
+  {% else %}
+  <div class="table-wrap" tabindex="0" role="region" aria-labelledby="deals-caption">
+    <table>
+      <caption id="deals-caption" class="vh">Список сделок</caption>
+      <thead>
+        <tr>
+          <th>№ сделки</th><th>Маршрут</th><th>Дата</th><th>Грузовладелец</th>
+          <th>Перевозчик / водитель</th><th>Госномер</th><th>Ставка</th><th>Стадия</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in rows %}
+        <tr>
+          <td data-label="№ сделки"><a class="num" href="/packages/{{ p.id }}">{{ p.number }}</a></td>
+          <td data-label="Маршрут">{{ p.route_label }}{% if p.list_note %}<div class="src">{{ p.list_note }}</div>{% endif %}</td>
+          <td data-label="Дата">{{ p.load_day }}</td>
+          <td data-label="Грузовладелец">{{ p.client_name or "—" }}</td>
+          <td data-label="Перевозчик / водитель">{{ p.who }}</td>
+          <td data-label="Госномер">{{ p.plate_label }}</td>
+          <td data-label="Ставка"><b>{{ p.rate_label }}</b></td>
+          <td data-label="Стадия">
+            <span class="chip {{ p.stage_class }}">{{ p.stage_label }}</span>
+            <div class="chain" aria-hidden="true">{% for bit in p.chain %}<i class="{{ bit }}"></i>{% endfor %}</div>
+            {% if p.gate %}<div class="gate">{{ p.gate }}</div>{% endif %}
+            {% if p.hint %}<div class="src">{{ p.hint }}</div>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

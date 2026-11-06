@@ -1,0 +1,98 @@
+#!/bin/sh
+# Локальный smoke: пустая база → POST /s/inbound/doc → Д-ГГГГ-0001, статус polucheno, UI открывается.
+# Секрет генерируется на запуск и в репозиторий не пишется.
+set -eu
+ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
+cd "$ROOT"
+TMP=$(mktemp -d)
+PID=""
+cleanup() {
+  if [ -n "${PID}" ]; then
+    kill "$PID" 2>/dev/null || true
+    wait "$PID" 2>/dev/null || true
+  fi
+  rm -rf "$TMP"
+}
+trap cleanup EXIT
+
+if [ -x "$ROOT/.venv/bin/python" ]; then
+  PY="$ROOT/.venv/bin/python"
+else
+  PY=python3
+fi
+
+PORT=$("$PY" -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')
+INBOUND_SECRET=$("$PY" -c 'import secrets; print(secrets.token_urlsafe(32))')
+export HOST=127.0.0.1
+export PORT
+export DATA_DIR="$TMP"
+export SQLITE_PATH="$TMP/delo.db"
+export INBOUND_SECRET
+export AUTH_MODE=off
+export NOTIFY_TG=0
+unset TG_BOT_TOKEN TG_CHAT_ID UI_PASSWORD UI_USER UI_GATE_SECRET || true
+
+"$PY" -m uvicorn app.main:app --host 127.0.0.1 --port "$PORT" --log-level warning >"$TMP/uvicorn.log" 2>&1 &
+PID=$!
+
+ready=0
+i=0
+while [ "$i" -lt 40 ]; do
+  if curl -sf "http://127.0.0.1:$PORT/health" >/dev/null; then
+    ready=1
+    break
+  fi
+  i=$((i + 1))
+  sleep 0.25
+done
+if [ "$ready" -ne 1 ]; then
+  echo "CRM не поднялась" >&2
+  cat "$TMP/uvicorn.log" >&2
+  exit 1
+fi
+
+curl -sS -o "$TMP/body.json" -w "%{http_code}" \
+  -H "Content-Type: application/json" \
+  -H "X-Inbound-Secret: $INBOUND_SECRET" \
+  -X POST "http://127.0.0.1:$PORT/s/inbound/doc" \
+  --data '{"source":"mail","from":"Иванова <docs@example.ru>","subject":"Заявка Москва Казань","text":"Просьба подписать заявку","client_hint":"ООО «Северный Хлеб»"}' \
+  >"$TMP/code.txt"
+
+"$PY" - "$TMP" "$PORT" <<'PY'
+import json, sys, urllib.request
+from datetime import date
+from pathlib import Path
+
+tmp = Path(sys.argv[1])
+port = sys.argv[2]
+code = (tmp / "code.txt").read_text().strip()
+body = json.loads((tmp / "body.json").read_text())
+year = date.today().year
+expect = f"Д-{year}-0001"
+if code != "200":
+    raise SystemExit(f"inbound http {code}: {body}")
+if body.get("status") != "polucheno" or body.get("number") != expect:
+    raise SystemExit(f"ждали {expect} polucheno, пришло {body}")
+if year == 2026 and body["number"] != "Д-2026-0001":
+    raise SystemExit(body)
+print(f"inbound {body['number']} {body['status']} id={body['id']}")
+
+page = urllib.request.urlopen(f"http://127.0.0.1:{port}/packages/{body['id']}").read().decode()
+if body["number"] not in page or "polucheno" not in page or "ATI Delivery" not in page:
+    raise SystemExit("карточка не показывает номер или polucheno")
+listing = urllib.request.urlopen(f"http://127.0.0.1:{port}/").read().decode()
+if "Список сделок" not in listing or body["number"] not in listing:
+    raise SystemExit("список не открылся")
+print("ui ok")
+PY
+
+code401=$(curl -sS -o /dev/null -w "%{http_code}" \
+  -H "Content-Type: application/json" \
+  -X POST "http://127.0.0.1:$PORT/s/inbound/doc" \
+  --data '{"source":"manual","text":"без секрета"}')
+if [ "$code401" != "401" ]; then
+  echo "без секрета ждали 401, пришло $code401" >&2
+  exit 1
+fi
+
+echo "smoke ok"

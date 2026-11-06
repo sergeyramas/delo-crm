@@ -1,0 +1,22 @@
+# /etc/systemd/system/delo-crm.service
+# Порт по умолчанию 8091. Если в env другой PORT, поправьте и nginx.
+# Секреты только в EnvironmentFile, не в этом юните.
+
+[Unit]
+Description=ATI Delo CRM
+After=network.target
+
+[Service]
+Type=simple
+User=delo
+Group=delo
+WorkingDirectory=/opt/delo-crm
+EnvironmentFile=/srv/ati/secrets/delo-crm.env
+ExecStart=/opt/delo-crm/.venv/bin/python bin/serve
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
