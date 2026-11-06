@@ -1,0 +1,216 @@
+{% extends "base.html" %}
+{% block title %}ATI Delivery · CRM — карточка {{ p.number }}{% endblock %}
+{% block body %}
+<div class="card split">
+  <div>
+    <div class="mut"><a href="/">← Список сделок</a></div>
+    <h1>Сделка {{ p.number }} · {{ p.route_label }}</h1>
+    <p class="mut">
+      {{ p.load_day }}{% if p.cargo %} · {{ p.cargo }}{% endif %}
+      · ставка <b>{{ p.rate_label }}</b>
+      {% if p.carrier_rate_label %} (перевозчику {{ p.carrier_rate_label }}){% endif %}
+    </p>
+    <span class="chip {{ p.stage_class }}">{{ p.stage_label }}</span>
+    <div class="src">Статус пакета: {{ p.status_label }} · {{ p.status }}</div>
+    {% if p.source_detail %}<div class="src">источник: {{ p.source }} · {{ p.source_detail }}</div>{% else %}<div class="src">источник: {{ p.source }}</div>{% endif %}
+    {% if p.gate %}<div class="gate">{{ p.gate }}</div>{% endif %}
+  </div>
+  {% if p.advance_label %}
+  <form method="post" action="/packages/{{ p.id }}/advance">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button class="btn" type="submit">{{ p.advance_label }}</button>
+    <div class="src">Внутри CRM. Клиенту и перевозчику ничего не уходит.</div>
+  </form>
+  {% else %}
+  <div>
+    <span class="btn ghost">{% if p.stage == 'otkaz' %}Отказ зафиксирован{% else %}Пакет в архиве{% endif %}</span>
+    <div class="src">Внутри CRM. Клиенту и перевозчику ничего не уходит.</div>
+  </div>
+  {% endif %}
+</div>
+<div class="card">
+  <h2>Стадии сделки</h2>
+  {% if p.stage == 'otkaz' %}<p class="gate">Отказ. {{ p.refusal_comment }}</p>{% endif %}
+  <div class="tl">
+    {% for step in p.timeline %}
+    <div class="{% if step.reached %}{{ step.class }}{% else %}off{% endif %}">
+      <b>{{ step.label }}</b><br><span class="mut">{{ step.at }}</span>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+<div class="grid">
+  <div>
+    <div class="card">
+      <h2>Пакет документов</h2>
+      {% if not docs %}<p class="mut">В пакете пока нет файлов.</p>{% endif %}
+      {% for doc in docs %}
+      <div class="doc">
+        <div>
+          <b>{{ doc.title }}</b>
+          <div class="mut">{{ doc.note }}</div>
+        </div>
+        <div>
+          <span class="chip {{ doc.css }}">{{ doc.state_label }}</span>
+          {% if doc.file_id %} <a class="dl" href="/files/{{ doc.file_id }}">Скачать</a>{% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="card">
+      <h2>Лента событий и писем</h2>
+      {% for event in events %}
+      <div class="msg {{ event.css }}">
+        <b>{{ event.heading }}</b> <span class="mut">{{ event.when }}{% if event.actor %} · {{ event.actor }}{% endif %}</span><br>
+        {{ event.text }}
+      </div>
+      {% endfor %}
+      {% if not events %}<p class="mut">Событий пока нет.</p>{% endif %}
+      <div class="mut"><a href="/packages/{{ p.id }}/feed">Полная лента — экран «Лента»</a> · {{ event_count }}</div>
+    </div>
+  </div>
+  <div>
+    <div class="card">
+      <h2>Стороны</h2>
+      <div class="doc">
+        <div>
+          <div class="mut">Грузовладелец / клиент</div>
+          <b>{% if p.client_party_id %}<a href="/parties/{{ p.client_party_id }}?from={{ p.id }}">{{ p.client_name or "Карточка заказчика" }}</a>{% else %}{{ p.client_name or "—" }}{% endif %}</b>
+          <div class="mut">{{ p.client_contact or "—" }}{% if p.client_email %} · {{ p.client_email }}{% endif %}{% if p.client_phone %} · {{ p.client_phone }}{% endif %}</div>
+          {% if p.client_party_id %}<div class="src"><a href="/parties/{{ p.client_party_id }}?from={{ p.id }}">Карточка заказчика</a></div>{% endif %}
+        </div>
+      </div>
+      <div class="doc">
+        <div>
+          <div class="mut">Перевозчик</div>
+          <b>{% if p.carrier_party_id %}<a href="/parties/{{ p.carrier_party_id }}?from={{ p.id }}">{{ p.carrier_name or "Карточка перевозчика" }}</a>{% else %}{{ p.carrier_name or "—" }}{% endif %}</b>
+          <div class="mut">{{ p.carrier_email or "—" }}{% if p.carrier_contract %} · {{ p.carrier_contract }}{% endif %}{% if p.carrier_phone %} · {{ p.carrier_phone }}{% endif %}</div>
+          {% if p.carrier_party_id %}<div class="src"><a href="/parties/{{ p.carrier_party_id }}?from={{ p.id }}">Карточка перевозчика</a></div>{% endif %}
+        </div>
+      </div>
+      <div class="doc">
+        <div>
+          <div class="mut">Водитель / машина</div>
+          <b>{% if p.driver_party_id %}<a href="/parties/{{ p.driver_party_id }}?from={{ p.id }}">{{ p.driver_name or "Карточка водителя" }}</a>{% else %}{{ p.driver_name or "—" }}{% endif %}</b>
+          <div class="mut">{{ p.driver_channel or "—" }}{% if p.plate %} · {{ p.plate }}{% endif %}{% if p.vehicle %} · {{ p.vehicle }}{% endif %}{% if p.driver_phone %} · {{ p.driver_phone }}{% endif %}</div>
+          {% if p.driver_party_id %}<div class="src"><a href="/parties/{{ p.driver_party_id }}?from={{ p.id }}">Карточка водителя</a></div>{% endif %}
+        </div>
+      </div>
+    </div>
+    <div class="card warn">
+      <h2>Флаги и точки «да»</h2>
+      {% if p.flags %}{{ p.flags }}<br>{% endif %}
+      <span class="mut">Наружу и в ATI — только после «да» Сергея. Подпись и печать — после «берём». Из CRM письма не отправляются.</span>
+    </div>
+  </div>
+</div>
+<div class="card">
+  <h2>Поля сделки</h2>
+  <form method="post" action="/packages/{{ p.id }}/update">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <fieldset>
+      <legend>Маршрут и груз</legend>
+      <div class="fields">
+        <div class="field"><label for="route_from">Откуда</label><input id="route_from" name="route_from" type="text" value="{{ p.route_from }}" maxlength="120" autocomplete="off"></div>
+        <div class="field"><label for="route_to">Куда</label><input id="route_to" name="route_to" type="text" value="{{ p.route_to }}" maxlength="120" autocomplete="off"></div>
+        <div class="field wide"><label for="cargo">Груз</label><input id="cargo" name="cargo" type="text" value="{{ p.cargo }}" maxlength="300"></div>
+        <div class="field"><label for="weight">Вес</label><input id="weight" name="weight" type="text" value="{{ p.weight }}" maxlength="60"></div>
+        <div class="field"><label for="pallets">Паллеты</label><input id="pallets" name="pallets" type="text" value="{{ p.pallets }}" maxlength="60"></div>
+        <div class="field"><label for="load_date">Дата погрузки</label><input id="load_date" name="load_date" type="date" value="{{ p.load_date }}"></div>
+        <div class="field"><label for="rate_rub">Ставка, ₽</label><input id="rate_rub" name="rate_rub" type="text" inputmode="numeric" value="{{ p.rate_rub if p.rate_rub is not none else '' }}" autocomplete="off"></div>
+        <div class="field"><label for="carrier_rate_rub">Ставка перевозчику, ₽</label><input id="carrier_rate_rub" name="carrier_rate_rub" type="text" inputmode="numeric" value="{{ p.carrier_rate_rub if p.carrier_rate_rub is not none else '' }}" autocomplete="off"></div>
+        <div class="field wide"><label for="list_note">Строка в списке</label><input id="list_note" name="list_note" type="text" value="{{ p.list_note }}" maxlength="300"></div>
+        <div class="field wide"><label for="source_detail">Источник, подробности</label><input id="source_detail" name="source_detail" type="text" value="{{ p.source_detail }}" maxlength="500"></div>
+        <div class="field wide"><label for="hint">Подсказка под стадией</label><input id="hint" name="hint" type="text" value="{{ p.hint }}" maxlength="300"></div>
+        <div class="field wide"><label for="gate">Точка «да»</label><input id="gate" name="gate" type="text" value="{{ p.gate }}" maxlength="300"></div>
+        <div class="field wide"><label for="flags">Красные флаги</label><textarea id="flags" name="flags" maxlength="2000">{{ p.flags }}</textarea></div>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend>Стороны</legend>
+      <div class="fields">
+        <div class="field"><label for="client_name">Клиент</label><input id="client_name" name="client_name" type="text" value="{{ p.client_name }}" maxlength="300" autocomplete="organization"></div>
+        <div class="field"><label for="client_contact">Контакт клиента</label><input id="client_contact" name="client_contact" type="text" value="{{ p.client_contact or '' }}" maxlength="200" autocomplete="name"></div>
+        <div class="field"><label for="client_email">Email клиента</label><input id="client_email" name="client_email" type="email" value="{{ p.client_email or '' }}" maxlength="200" autocomplete="email" autocapitalize="off" spellcheck="false"></div>
+        <div class="field"><label for="client_phone">Телефон клиента</label><input id="client_phone" name="client_phone" type="tel" value="{{ p.client_phone or '' }}" maxlength="80" autocomplete="tel"></div>
+        <div class="field"><label for="client_inn">ИНН клиента</label><input id="client_inn" name="client_inn" type="text" inputmode="numeric" value="{{ p.client_inn or '' }}" maxlength="20" autocomplete="off"></div>
+        <div class="field"><label for="client_company">Компания клиента</label><input id="client_company" name="client_company" type="text" value="{{ p.client_company or '' }}" maxlength="300" autocomplete="organization"></div>
+        <div class="field wide"><label for="client_note">Заметка по клиенту</label><input id="client_note" name="client_note" type="text" value="{{ p.client_note or '' }}" maxlength="2000"></div>
+        <div class="field"><label for="carrier_name">Перевозчик</label><input id="carrier_name" name="carrier_name" type="text" value="{{ p.carrier_name }}" maxlength="200"></div>
+        <div class="field"><label for="carrier_email">Email перевозчика</label><input id="carrier_email" name="carrier_email" type="email" value="{{ p.carrier_email }}" maxlength="200" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
+        <div class="field"><label for="carrier_phone">Телефон перевозчика</label><input id="carrier_phone" name="carrier_phone" type="tel" value="{{ p.carrier_phone or '' }}" maxlength="80" autocomplete="tel"></div>
+        <div class="field"><label for="carrier_inn">ИНН перевозчика</label><input id="carrier_inn" name="carrier_inn" type="text" inputmode="numeric" value="{{ p.carrier_inn or '' }}" maxlength="20" autocomplete="off"></div>
+        <div class="field"><label for="carrier_contract">Договор</label><input id="carrier_contract" name="carrier_contract" type="text" value="{{ p.carrier_contract }}" maxlength="120"></div>
+        <div class="field"><label for="driver_name">Водитель</label><input id="driver_name" name="driver_name" type="text" value="{{ p.driver_name }}" maxlength="120" autocomplete="name"></div>
+        <div class="field"><label for="driver_phone">Телефон водителя</label><input id="driver_phone" name="driver_phone" type="tel" value="{{ p.driver_phone or '' }}" maxlength="80" autocomplete="tel"></div>
+        <div class="field"><label for="driver_email">Email водителя</label><input id="driver_email" name="driver_email" type="email" value="{{ p.driver_email or '' }}" maxlength="200" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
+        <div class="field"><label for="driver_channel">Канал водителя</label><input id="driver_channel" name="driver_channel" type="text" value="{{ p.driver_channel }}" maxlength="120"></div>
+        <div class="field"><label for="plate">Госномер</label><input id="plate" name="plate" type="text" value="{{ p.plate }}" maxlength="40" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
+        <div class="field"><label for="vehicle">Машина</label><input id="vehicle" name="vehicle" type="text" value="{{ p.vehicle }}" maxlength="80"></div>
+        <div class="field"><label for="license_no">Водительское удостоверение</label><input id="license_no" name="license_no" type="text" value="{{ p.license_no or '' }}" maxlength="40" autocomplete="off"></div>
+        <div class="field"><label for="passport_no">Паспорт водителя</label><input id="passport_no" name="passport_no" type="text" value="{{ p.passport_no or '' }}" maxlength="40" autocomplete="off"></div>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend>Стадия и статус пакета</legend>
+      <div class="fields">
+        <div class="field">
+          <label for="stage">Стадия сделки</label>
+          <select id="stage" name="stage">
+            {% for item in stages %}
+            <option value="{{ item.code }}" {% if p.stage == item.code %}selected{% endif %}>{{ item.label }}</option>
+            {% endfor %}
+            <option value="otkaz" {% if p.stage == 'otkaz' %}selected{% endif %}>Отказ</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="pkg-status">Статус пакета</label>
+          <select id="pkg-status" name="status">
+            {% for item in statuses %}
+            <option value="{{ item.code }}" {% if p.status == item.code %}selected{% endif %}>{{ item.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field">
+          <label for="decision">Решение</label>
+          <select id="decision" name="decision">
+            <option value="" {% if not p.decision %}selected{% endif %}>не выбрано</option>
+            <option value="berem" {% if p.decision == 'berem' %}selected{% endif %}>берём</option>
+            <option value="ne_berem" {% if p.decision == 'ne_berem' %}selected{% endif %}>не берём</option>
+          </select>
+        </div>
+        <div class="field wide">
+          <label for="refusal_comment">Комментарий к отказу</label>
+          <textarea id="refusal_comment" name="refusal_comment" maxlength="2000">{{ p.refusal_comment }}</textarea>
+        </div>
+        <div class="field check"><input type="hidden" name="signed_client" value="0"><input id="signed_client" type="checkbox" name="signed_client" value="1" {% if p.signed_client %}checked{% endif %}><label for="signed_client">Подпись заказчика есть</label></div>
+        <div class="field check"><input type="hidden" name="signed_carrier" value="0"><input id="signed_carrier" type="checkbox" name="signed_carrier" value="1" {% if p.signed_carrier %}checked{% endif %}><label for="signed_carrier">Подпись перевозчика есть</label></div>
+      </div>
+    </fieldset>
+    <p><button class="btn" type="submit">Сохранить поля</button></p>
+    <p class="mut">Смена стадии пишет событие в ленту и, если включён NOTIFY_TG, только тогда зовёт Telegram. Почта отсюда не уходит.</p>
+  </form>
+</div>
+<div class="grid">
+  <div class="card">
+    <h2>Заметка</h2>
+    <form method="post" action="/packages/{{ p.id }}/note">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="back" value="/packages/{{ p.id }}">
+      <div class="field"><label for="note-title">Заголовок</label><input id="note-title" name="title" type="text" maxlength="200"></div>
+      <div class="field"><label for="note-text">Текст</label><textarea id="note-text" name="text" required maxlength="8000"></textarea></div>
+      <p><button class="btn" type="submit">Записать заметку</button></p>
+    </form>
+  </div>
+  <div class="card">
+    <h2>Файл в пакет</h2>
+    <form method="post" action="/packages/{{ p.id }}/file" enctype="multipart/form-data">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <div class="field"><label for="file-title">Название</label><input id="file-title" name="title" type="text" maxlength="200"></div>
+      <div class="field"><label for="file-note">Пояснение</label><input id="file-note" name="note" type="text" maxlength="500"></div>
+      <div class="field"><label for="file">Файл, до 8 МБ</label><input id="file" name="file" type="file" required></div>
+      <p><button class="btn" type="submit">Приложить файл</button></p>
+    </form>
+  </div>
+</div>
+{% endblock %}

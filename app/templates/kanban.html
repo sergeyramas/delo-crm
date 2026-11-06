@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}ATI Delivery · CRM — воронка сделок{% endblock %}
+{% block body %}
+<div class="card split">
+  <h2>Воронка сделок · {{ today }}</h2>
+  <span class="mut">от находки до оплаты · номера Д-ГГГГ-NNNN</span>
+</div>
+{% if board_truncated %}
+<p class="banner">На доске последние {{ board_cap }} обновлённых сделок из {{ board_total }}. Остальные — в списке, постранично.</p>
+{% endif %}
+<div class="kb">
+  {% for col in columns %}
+  <section class="col" aria-labelledby="col-{{ col.code }}">
+    <h3 id="col-{{ col.code }}"><span class="dot {{ col.class }}">● {{ col.label }}</span><span class="mut">{{ col.count }}</span></h3>
+    {% for p in col.cards %}
+    <article class="t {{ p.stage_class }}">
+      <a class="ln" href="/packages/{{ p.id }}">{{ p.number }}</a>
+      <a class="title" href="/packages/{{ p.id }}"><b>{{ p.board_title or p.route_label }}</b></a>
+      {% if p.board_note or p.list_note %}<div class="src">{{ p.board_note or p.list_note }}</div>{% endif %}
+      {% if p.gate %}<div class="gate">{{ p.gate }}</div>{% endif %}
+      <div class="meta"><span>{{ p.meta_left }}</span><span>{% if p.meta_right %}👤 {{ p.meta_right }}{% endif %}</span></div>
+    </article>
+    {% endfor %}
+    {% if not col.cards %}<p class="mut">Пусто</p>{% endif %}
+  </section>
+  {% endfor %}
+</div>
+{% if refused %}
+<div class="card">
+  <h2>Отказ</h2>
+  {% for p in refused %}
+  <p><a class="num" href="/packages/{{ p.id }}">{{ p.number }}</a> {{ p.route_label }} — {{ p.refusal_comment or "без комментария" }}</p>
+  {% endfor %}
+</div>
+{% endif %}
+<div class="card">
+  <h2>Задачи на день · рядом с воронкой</h2>
+  <p class="mut">Колонки «Сегодня / В работе / Ждём / Готово» остаются рабочим слоем поверх сделки.</p>
+  <div class="kb tasks">
+    {% for bucket in buckets %}
+    <section class="col" aria-labelledby="bucket-{{ bucket.code }}">
+      <h3 id="bucket-{{ bucket.code }}"><span class="dot {{ bucket.class }}">● {{ bucket.label }}</span><span class="mut">{{ bucket.count }}</span></h3>
+        {% for task in bucket.tasks %}
+      <article class="t {{ task.stage_class }}">
+        <a class="ln" href="/packages/{{ task.package_id }}">{{ task.number }}</a>
+        <b class="title">{{ task.title }}</b>
+        <div class="meta"><span>{% if task.due_label %}⏰ {{ task.due_label }}{% endif %}</span><span>{% if task.assignee %}👤 {{ task.assignee }}{% endif %}</span></div>
+        <form class="task-move" method="post" action="/tasks/{{ task.id }}/bucket">
+          <input type="hidden" name="csrf" value="{{ csrf }}">
+          <label class="vh" for="bucket-{{ task.id }}">Колонка задачи {{ task.title }}</label>
+          <select id="bucket-{{ task.id }}" name="bucket" aria-label="Перенести задачу">
+            {% for opt in bucket_defs %}
+            <option value="{{ opt.code }}" {% if opt.code == task.bucket %}selected{% endif %}>{{ opt.label }}</option>
+            {% endfor %}
+          </select>
+          <button class="btn ghost" type="submit">Перенести</button>
+        </form>
+      </article>
+      {% endfor %}
+    </section>
+    {% endfor %}
+  </div>
+</div>
+<div class="card">
+  <h2>Новая задача</h2>
+  <form method="post" action="/tasks">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <div class="fields">
+      <div class="field">
+        <label for="package_id">Сделка</label>
+        <select id="package_id" name="package_id" required>
+          {% for p in packages %}
+          <option value="{{ p.id }}">{{ p.number }} · {{ p.route_label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label for="task-title">Задача</label>
+        <input id="task-title" name="title" type="text" required maxlength="200" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="task-bucket">Колонка</label>
+        <select id="task-bucket" name="bucket">
+          {% for opt in bucket_defs %}
+          <option value="{{ opt.code }}">{{ opt.label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field">
+        <label for="due_label">Срок</label>
+        <input id="due_label" name="due_label" type="text" maxlength="80" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="assignee">Кто</label>
+        <input id="assignee" name="assignee" type="text" maxlength="120" autocomplete="off">
+      </div>
+    </div>
+    <p><button class="btn" type="submit">Добавить задачу</button></p>
+  </form>
+  {% if not packages %}<p class="mut">Сначала нужен пакет: POST /s/inbound/doc.</p>{% endif %}
+</div>
+{% endblock %}
