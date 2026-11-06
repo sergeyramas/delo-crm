@@ -72,6 +72,11 @@
     <p class="src">Кнопка «Написать» сама ничего не шлёт. Telegram — только после подтверждения на следующем экране, от имени «{{ tg_actor }}».</p>
   </div>
 </div>
+{% if party.kind == 'driver' and gps %}
+<div class="card" id="gps">
+  {% include "_gps.html" %}
+</div>
+{% endif %}
 <div class="card">
   <h2>Сделки</h2>
   {% if not deals %}<p class="mut">Сделок с этой карточкой пока нет.</p>{% endif %}

@@ -261,6 +261,7 @@ def public_driver(row: dict, passport: dict | None = None, license_file: dict | 
         "consent": bool(row["consent"]),
         "consent_at": row["consent_at"],
         "user_is_carrier": bool(row["user_is_carrier"]),
+        "gps_status": row.get("gps_status") or "off",
         "passport_file": _public_file(passport),
         "license_file": _public_file(license_file),
     }

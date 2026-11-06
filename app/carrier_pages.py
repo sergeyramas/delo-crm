@@ -433,6 +433,10 @@ def page_driver_card(request: Request, carrier_id: int, driver_id: int):
     if carrier is None or driver is None:
         ctx = base_ctx(request, "carriers")
         return templates.TemplateResponse(request, "missing.html", ctx, status_code=404)
+    from app.gps import panel_driver
+
+    user = getattr(request.state, "user", None)
+    driver["gps"] = panel_driver(request.app.state.db, user, driver, carrier_id)
     ctx = base_ctx(request, "carriers")
     ctx.update({"carrier": carrier, "driver": driver})
     return templates.TemplateResponse(request, "driver_card.html", ctx)

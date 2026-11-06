@@ -109,6 +109,7 @@ def public_party(row: dict) -> dict:
         "wa_status": _status(row["wa_status"]),
         "max_status": _status(row["max_status"]),
         "messengers_checked_at": row["messengers_checked_at"],
+        "gps_status": row.get("gps_status") or "off",
     }
 
 

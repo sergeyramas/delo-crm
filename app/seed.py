@@ -269,6 +269,9 @@ def _times(item: dict) -> dict:
 
 def _wipe(conn) -> None:
     for table in (
+        "gps_polls",
+        "gps_points",
+        "gps_drafts",
         "messages",
         "package_doc_tracks",
         "negotiations",
@@ -328,6 +331,7 @@ def _enrich(conn, settings) -> None:
             {
                 "name": "Орлов К.",
                 "phone": "+7 903 555-00-10",
+                "email": "orlov.k@example.ru",
                 "vehicle": "тент",
                 "plate": "А123ВС 777",
                 "license_no": "77 00 123456",
@@ -574,6 +578,12 @@ def main() -> int:
 
         backfill_conn(conn, settings, "2026-11-06T18:05:00")
         _enrich(conn, settings)
+        conn.execute(
+            "UPDATE packages SET dispatcher_login = 'andrey', gps_status = 'off' WHERE number = 'Д-2026-0001'"
+        )
+        conn.execute(
+            "UPDATE parties SET gps_status = 'off' WHERE kind = 'driver' AND name = 'Орлов К.'"
+        )
         _messages(conn, pkg)
         from app.carriers import seed_doronin, seed_negotiations, seed_package_link
         from app.tracks import sync_from_package

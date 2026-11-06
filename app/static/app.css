@@ -223,6 +223,12 @@ a.deal-link{font-weight:700;display:inline-flex;align-items:center;min-height:44
 .badge.failed{background:#b91c1c}
 .badge.received{background:#2563eb}
 .badge.read{background:#0891b2}
+.badge.gps-off{background:#64748b}
+.badge.gps-invited{background:#d97706}
+.badge.gps-tracking{background:#16a34a}
+.gps-map{min-height:140px;margin:12px 0;padding:16px;border:1px dashed #94a3b8;border-radius:12px;background:#f8fafc;color:#475569;display:flex;align-items:center}
+.gps-send{margin-top:12px;max-width:420px}
+.gps-send .btn{margin-top:8px}
 .badge.in{background:#0f766e}
 .badge.out{background:#ea580c}
 .badge.email{background:#7c3aed}

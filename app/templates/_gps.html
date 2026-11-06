@@ -1,0 +1,39 @@
+<section class="gps" id="gps-{{ gps.anchor }}" aria-labelledby="gps-title-{{ gps.anchor }}">
+  <h2 id="gps-title-{{ gps.anchor }}">GPS · АТИ Водитель</h2>
+  <p><span class="badge {{ gps.badge }}">{{ gps.status_label }}</span></p>
+  <p class="src">{{ gps.access_note }} {{ gps.retention_note }}</p>
+  <div class="gps-map">{{ gps.map_text }}</div>
+  {% if gps.point_line %}<p class="src">Последняя точка: {{ gps.point_line }}</p>{% endif %}
+  <p class="src">{{ gps.stub_line }}</p>
+  {% if gps.ready %}
+  <form method="post" action="{{ gps.track_action }}">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="next" value="{{ gps.next }}">
+    <button class="btn" type="submit">Отслеживать</button>
+  </form>
+  <form method="post" action="{{ gps.instruct_action }}" class="gps-send">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="next" value="{{ gps.next }}">
+    {% if gps.package_id %}<input type="hidden" name="package_id" value="{{ gps.package_id }}">{% endif %}
+    <div class="field">
+      <label for="gps-channel-{{ gps.anchor }}">Куда положить черновик</label>
+      <select id="gps-channel-{{ gps.anchor }}" name="channel">
+        {% for item in gps.channels %}
+        <option value="{{ item.code }}" {% if item.selected %}selected{% endif %} {% if not item.available %}disabled{% endif %}>{{ item.label }}{% if not item.available %} — нет в карточке{% endif %}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <button class="btn ghost" type="submit">Отправить инструкцию для отслеживания</button>
+  </form>
+  <p class="src">PDF и текст лежат в CRM. <a href="{{ gps.pdf_href }}">Открыть PDF</a>. Наружу ничего не уходит: это черновик.</p>
+  {% else %}
+  <p class="mut">На сделке нет водителя. Инструкцию отправить некуда.</p>
+  {% endif %}
+  {% for draft in gps.drafts %}
+  <div class="msg">
+    <b>Черновик · {{ draft.channel }}</b>
+    <span class="mut">{{ draft.created_at }} · {{ draft.status }} · {{ draft.attachment }}</span>
+    <div class="src">{{ draft.detail }}</div>
+  </div>
+  {% endfor %}
+</section>
