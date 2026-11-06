@@ -1,0 +1,18 @@
+<div class="fields">
+  <div class="field"><label for="fio-{{ prefix }}">ФИО</label><input id="fio-{{ prefix }}" name="name" type="text" required maxlength="200" value="{{ item.name if item else '' }}" autocomplete="name"></div>
+  <div class="field"><label for="birth-{{ prefix }}">Дата рождения</label><input id="birth-{{ prefix }}" name="birth_date" type="date" required value="{{ item.birth_date if item else '' }}"></div>
+  <div class="field"><label for="dphone-{{ prefix }}">Телефон</label><input id="dphone-{{ prefix }}" name="phone" type="tel" required maxlength="80" value="{{ item.phone if item else '' }}" autocomplete="tel"></div>
+  <div class="field"><label for="ps-{{ prefix }}">Паспорт, серия</label><input id="ps-{{ prefix }}" name="passport_series" type="text" required maxlength="20" value="{{ item.passport_series if item else '' }}"></div>
+  <div class="field"><label for="pn-{{ prefix }}">Паспорт, номер</label><input id="pn-{{ prefix }}" name="passport_number" type="text" required maxlength="20" value="{{ item.passport_number if item else '' }}"></div>
+  <div class="field wide"><label for="pby-{{ prefix }}">Кем выдан</label><input id="pby-{{ prefix }}" name="passport_issued_by" type="text" required maxlength="300" value="{{ item.passport_issued_by if item else '' }}"></div>
+  <div class="field"><label for="pat-{{ prefix }}">Когда выдан</label><input id="pat-{{ prefix }}" name="passport_issued_at" type="date" required value="{{ item.passport_issued_at if item else '' }}"></div>
+  <div class="field"><label for="pcode-{{ prefix }}">Код подразделения</label><input id="pcode-{{ prefix }}" name="passport_dept_code" type="text" required maxlength="20" value="{{ item.passport_dept_code if item else '' }}"></div>
+  <div class="field"><label for="ls-{{ prefix }}">ВУ, серия</label><input id="ls-{{ prefix }}" name="license_series" type="text" required maxlength="20" value="{{ item.license_series if item else '' }}"></div>
+  <div class="field"><label for="ln-{{ prefix }}">ВУ, номер</label><input id="ln-{{ prefix }}" name="license_number" type="text" required maxlength="20" value="{{ item.license_number if item else '' }}"></div>
+  <div class="field"><label for="lat-{{ prefix }}">ВУ выдано</label><input id="lat-{{ prefix }}" name="license_issued_at" type="date" required value="{{ item.license_issued_at if item else '' }}"></div>
+  <div class="field"><label for="lby-{{ prefix }}">Кем выдано ВУ</label><input id="lby-{{ prefix }}" name="license_issued_by" type="text" required maxlength="120" value="{{ item.license_issued_by if item else '' }}"></div>
+  <div class="field"><label for="lto-{{ prefix }}">ВУ действует до</label><input id="lto-{{ prefix }}" name="license_valid_until" type="date" required value="{{ item.license_valid_until if item else '' }}"></div>
+  <div class="field"><label for="lcats-{{ prefix }}">Категории</label><input id="lcats-{{ prefix }}" name="license_categories" type="text" required maxlength="80" value="{{ item.license_categories if item else '' }}"></div>
+  <div class="field check"><input type="hidden" name="consent" value="0"><input id="consent-{{ prefix }}" type="checkbox" name="consent" value="1" {% if item and item.consent %}checked{% endif %}><label for="consent-{{ prefix }}">Согласие на передачу данных</label></div>
+  <div class="field check"><input type="hidden" name="user_is_carrier" value="0"><input id="same-{{ prefix }}" type="checkbox" name="user_is_carrier" value="1" {% if item and item.user_is_carrier %}checked{% endif %}><label for="same-{{ prefix }}">Это тот же человек, что перевозчик</label></div>
+</div>

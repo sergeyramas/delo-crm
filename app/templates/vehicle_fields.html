@@ -1,0 +1,11 @@
+<div class="fields">
+  <div class="field wide"><label for="make-{{ prefix }}">Марка, модель</label><input id="make-{{ prefix }}" name="make_model" type="text" required maxlength="500" value="{{ item.make_model if item else '' }}"></div>
+  <div class="field"><label for="body-{{ prefix }}">Кузов</label><input id="body-{{ prefix }}" name="body" type="text" required maxlength="80" value="{{ item.body if item else '' }}"></div>
+  <div class="field"><label for="volume-{{ prefix }}">Объём</label><input id="volume-{{ prefix }}" name="volume" type="text" required maxlength="80" value="{{ item.volume if item else '' }}"></div>
+  <div class="field"><label for="loading-{{ prefix }}">Способ погрузки</label><input id="loading-{{ prefix }}" name="loading" type="text" required maxlength="200" value="{{ item.loading if item else '' }}"></div>
+  <div class="field"><label for="plate-{{ prefix }}">Госномер ТС</label><input id="plate-{{ prefix }}" name="plate" type="text" required maxlength="40" value="{{ item.plate if item else '' }}" autocomplete="off"></div>
+  <div class="field"><label for="trailer-{{ prefix }}">Госномер прицепа</label><input id="trailer-{{ prefix }}" name="trailer_plate" type="text" maxlength="40" value="{{ item.trailer_plate if item else '' }}" autocomplete="off"></div>
+  <div class="field"><label for="vin-{{ prefix }}">VIN</label><input id="vin-{{ prefix }}" name="vin" type="text" required maxlength="40" value="{{ item.vin if item else '' }}" autocomplete="off"></div>
+  <div class="field"><label for="sts-series-{{ prefix }}">СТС, серия</label><input id="sts-series-{{ prefix }}" name="sts_series" type="text" required maxlength="20" value="{{ item.sts_series if item else '' }}" autocomplete="off"></div>
+  <div class="field"><label for="sts-number-{{ prefix }}">СТС, номер</label><input id="sts-number-{{ prefix }}" name="sts_number" type="text" required maxlength="20" value="{{ item.sts_number if item else '' }}" autocomplete="off"></div>
+</div>

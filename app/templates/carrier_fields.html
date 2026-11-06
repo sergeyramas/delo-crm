@@ -1,0 +1,20 @@
+<div class="fields">
+  <div class="field"><label for="name">Наименование</label><input id="name" name="name" type="text" required maxlength="300" value="{{ carrier.name if carrier else '' }}" autocomplete="organization"></div>
+  <div class="field">
+    <label for="kind">Тип</label>
+    <select id="kind" name="kind" required>
+      {% set kind = carrier.kind if carrier else '' %}
+      <option value="self_employed" {% if kind == 'self_employed' %}selected{% endif %}>Самозанятый</option>
+      <option value="ip" {% if kind == 'ip' %}selected{% endif %}>ИП</option>
+      <option value="ooo" {% if kind == 'ooo' %}selected{% endif %}>ООО</option>
+    </select>
+  </div>
+  <div class="field"><label for="inn">ИНН</label><input id="inn" name="inn" type="text" inputmode="numeric" required maxlength="20" value="{{ carrier.inn if carrier else '' }}" autocomplete="off"></div>
+  <div class="field"><label for="ogrn">ОГРН / ОГРНИП</label><input id="ogrn" name="ogrn" type="text" inputmode="numeric" maxlength="20" value="{{ carrier.ogrn if carrier else '' }}" autocomplete="off"><span class="mut">Для самозанятого не обязателен.</span></div>
+  <div class="field"><label for="phone">Телефон</label><input id="phone" name="phone" type="tel" required maxlength="80" value="{{ carrier.phone if carrier else '' }}" autocomplete="tel"></div>
+  <div class="field"><label for="email">E-mail</label><input id="email" name="email" type="email" maxlength="200" value="{{ carrier.email if carrier else '' }}" autocomplete="off"></div>
+  <div class="field"><label for="max_contact">MAX</label><input id="max_contact" name="max_contact" type="text" maxlength="80" value="{{ carrier.max_contact if carrier else '' }}"></div>
+  <div class="field"><label for="tg_contact">Telegram</label><input id="tg_contact" name="tg_contact" type="text" maxlength="80" value="{{ carrier.tg_contact if carrier else '' }}"></div>
+  <div class="field"><label for="wa_contact">WhatsApp</label><input id="wa_contact" name="wa_contact" type="text" maxlength="80" value="{{ carrier.wa_contact if carrier else '' }}"></div>
+  <div class="field wide"><label for="note">Заметки</label><textarea id="note" name="note" maxlength="2000">{{ carrier.note if carrier else '' }}</textarea></div>
+</div>

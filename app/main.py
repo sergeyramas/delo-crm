@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api import inbound_ok, router as api_router
 from app.auth import authenticate, sync_users
+from app.carrier_pages import router as carrier_pages_router
 from app.config import Settings
 from app.db import Database
 from app.logic import ApiError
@@ -101,6 +102,7 @@ def create_app() -> FastAPI:
         return Response(status_code=204)
 
     app.include_router(api_router)
+    app.include_router(carrier_pages_router)
     app.include_router(ui_router)
     app.mount("/static", StaticFiles(directory=str(ROOT / "app" / "static")), name="static")
     return app

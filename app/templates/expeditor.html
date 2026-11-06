@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}ATI Delivery · CRM — экспедитор{% endblock %}
+{% block body %}
+<div class="card">
+  <div class="mut"><a href="/carriers">← Перевозчики</a></div>
+  <h1>Экспедитор</h1>
+  <p class="mut">Одно юрлицо, блок 1 карточки PDF. Диспетчер по рейсу в PDF берётся отсюда, а если человек вошёл в CRM — подставляется его имя.</p>
+  {% if not can_admin %}<p class="gate">Правит только админ. Диспетчер видит реквизиты и использует их в карточке.</p>{% endif %}
+  <form method="post" action="/carriers/expeditor">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <div class="fields">
+      <div class="field wide"><label for="name">Наименование</label><input id="name" name="name" type="text" maxlength="300" value="{{ expeditor.name }}" {% if not can_admin %}readonly{% endif %}></div>
+      <div class="field"><label for="inn">ИНН</label><input id="inn" name="inn" type="text" maxlength="20" value="{{ expeditor.inn }}" {% if not can_admin %}readonly{% endif %}></div>
+      <div class="field"><label for="ogrnip">ОГРНИП</label><input id="ogrnip" name="ogrnip" type="text" maxlength="20" value="{{ expeditor.ogrnip }}" {% if not can_admin %}readonly{% endif %}></div>
+      <div class="field wide"><label for="address">Адрес</label><textarea id="address" name="address" maxlength="500" {% if not can_admin %}readonly{% endif %}>{{ expeditor.address }}</textarea></div>
+      <div class="field wide"><label for="bank">Банк</label><input id="bank" name="bank" type="text" maxlength="300" value="{{ expeditor.bank }}" {% if not can_admin %}readonly{% endif %}></div>
+      <div class="field"><label for="account">Р/с</label><input id="account" name="account" type="text" maxlength="40" value="{{ expeditor.account }}" {% if not can_admin %}readonly{% endif %}></div>
+      <div class="field"><label for="bik">БИК</label><input id="bik" name="bik" type="text" maxlength="20" value="{{ expeditor.bik }}" {% if not can_admin %}readonly{% endif %}></div>
+      <div class="field"><label for="corr_account">К/с</label><input id="corr_account" name="corr_account" type="text" maxlength="40" value="{{ expeditor.corr_account }}" {% if not can_admin %}readonly{% endif %}></div>
+      <div class="field"><label for="phone">Телефон</label><input id="phone" name="phone" type="tel" maxlength="80" value="{{ expeditor.phone }}" {% if not can_admin %}readonly{% endif %}></div>
+      <div class="field"><label for="email">E-mail</label><input id="email" name="email" type="email" maxlength="200" value="{{ expeditor.email }}" {% if not can_admin %}readonly{% endif %}></div>
+      <div class="field"><label for="dispatcher_name">Диспетчер по рейсу</label><input id="dispatcher_name" name="dispatcher_name" type="text" maxlength="200" value="{{ expeditor.dispatcher_name }}" {% if not can_admin %}readonly{% endif %}></div>
+      <div class="field"><label for="dispatcher_phone">Телефон диспетчера</label><input id="dispatcher_phone" name="dispatcher_phone" type="tel" maxlength="80" value="{{ expeditor.dispatcher_phone }}" {% if not can_admin %}readonly{% endif %}></div>
+      <div class="field"><label for="ati_code">Код в ATI.SU</label><input id="ati_code" name="ati_code" type="text" maxlength="40" value="{{ expeditor.ati_code }}" {% if not can_admin %}readonly{% endif %}></div>
+      <div class="field"><label for="edo_id">ЭДО ID участника</label><input id="edo_id" name="edo_id" type="text" maxlength="80" value="{{ expeditor.edo_id }}" {% if not can_admin %}readonly{% endif %}></div>
+    </div>
+    {% if can_admin %}<p><button class="btn" type="submit">Сохранить экспедитора</button></p>{% endif %}
+  </form>
+</div>
+{% endblock %}

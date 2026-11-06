@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}ATI Delivery · CRM — перевозчики{% endblock %}
+{% block body %}
+<div class="card split">
+  <div>
+    <h1>Перевозчики</h1>
+    <p class="mut">Реестр для карточки PDF: перевозчик, его ТС и водители. Карточки контрагентов из заявки здесь не дублируются.</p>
+  </div>
+  <div class="haul">
+    {% if can_write %}<a class="btn" href="/carriers/new">Новый перевозчик</a>{% endif %}
+    <a class="btn ghost" href="/carriers/expeditor">Экспедитор</a>
+  </div>
+</div>
+<div class="card">
+  <form class="status-form" method="get" action="/carriers">
+    <div class="field">
+      <label for="q">Поиск по ФИО, названию, ИНН или телефону</label>
+      <input id="q" name="q" type="text" value="{{ q }}" maxlength="80" autocomplete="off">
+    </div>
+    <button class="btn" type="submit">Найти</button>
+  </form>
+  {% if expeditor.name %}
+  <p class="src">Экспедитор в карточке: {{ expeditor.name }}</p>
+  {% else %}
+  <p class="src">Реквизиты экспедитора ещё пустые. Их заполняет админ.</p>
+  {% endif %}
+</div>
+<div class="card">
+  {% if not rows %}<p class="mut">Никого не найдено.</p>{% endif %}
+  <div class="table-wrap" tabindex="0">
+    <table>
+      <thead>
+        <tr><th>Наименование</th><th>Тип</th><th>ИНН</th><th>Телефон</th><th>ТС</th><th>Водители</th></tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td data-label="Наименование"><a class="num" href="/carriers/{{ row.id }}">{{ row.name }}</a></td>
+          <td data-label="Тип">{{ row.kind_label }}</td>
+          <td data-label="ИНН">{{ row.inn }}</td>
+          <td data-label="Телефон">{{ row.phone }}</td>
+          <td data-label="ТС">{{ row.vehicle_count }}</td>
+          <td data-label="Водители">{{ row.driver_count }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

@@ -14,6 +14,7 @@
   <nav class="nav" aria-label="Разделы">
     <a href="/" {% if active == 'list' %}class="on" aria-current="page"{% endif %}>Список</a>
     <a href="/kanban" {% if active == 'kanban' %}class="on" aria-current="page"{% endif %}>Воронка</a>
+    <a href="/carriers" {% if active == 'carriers' %}class="on" aria-current="page"{% endif %}>Перевозчики</a>
     {% if current_id %}
     <a href="/packages/{{ current_id }}" {% if active == 'card' %}class="on" aria-current="page"{% endif %}>Карточка</a>
     <a href="/packages/{{ current_id }}/feed" {% if active == 'feed' %}class="on" aria-current="page"{% endif %}>Лента</a>

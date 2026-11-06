@@ -92,6 +92,7 @@
   <p class="mut" id="scans-help">
     СТС{% if party.vehicle %} машины {{ party.vehicle }}{% endif %}{% if party.plate %}, госномер {{ party.plate }}{% endif %},
     водительские права и паспорт. Файл лежит на диске CRM. Заявка его сама не прикладывает, почта из CRM не уходит.
+    Реестр «Перевозчики» — отдельные ТС и водители: отсюда PDF-карточку не собираем и эти сканы туда не копируем.
   </p>
   {% for scan in scans %}
   <form method="post" action="/parties/{{ party.id }}/scans" enctype="multipart/form-data">

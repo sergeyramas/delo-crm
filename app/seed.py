@@ -269,6 +269,13 @@ def _times(item: dict) -> dict:
 
 def _wipe(conn) -> None:
     for table in (
+        "package_doc_tracks",
+        "negotiations",
+        "fleet_files",
+        "drivers",
+        "vehicles",
+        "carriers",
+        "expeditor",
         "party_scans",
         "outbound_messages",
         "tasks",
@@ -417,7 +424,22 @@ def main() -> int:
 
         backfill_conn(conn, settings, "2026-11-06T18:05:00")
         _enrich(conn, settings)
-    print(f"Макет: 9 сделок в {settings.sqlite_path}. Следующий живой номер 2026 года будет Д-2026-0010.")
+        from app.carriers import seed_doronin, seed_negotiations, seed_package_link
+        from app.tracks import sync_from_package
+
+        fleet = seed_doronin(conn, settings.data_dir, "2026-11-06T18:20:00")
+        seed_package_link(conn, "Д-2026-0003", fleet, "2026-11-06T18:21:00")
+        seed_negotiations(
+            conn,
+            "Д-2026-0003",
+            [
+                ("2026-11-06T11:00:00", "Сергей", "Ставка 21 000 ₽, окна склада 09:00–15:00. Ждём паспорт."),
+                ("2026-11-06T12:30:00", "Андрей", "Паспорт обещали сегодня. Оплата по сканам, оригиналы потом."),
+            ],
+        )
+        for row in conn.execute("SELECT * FROM packages"):
+            sync_from_package(conn, dict(row), row["updated_at"])
+    print(f"Макет: 9 сделок в {settings.sqlite_path}. Доронин и экспедитор из образца карточки. Следующий живой номер 2026 года будет Д-2026-0010.")
     return 0
 
 

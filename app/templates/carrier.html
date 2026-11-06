@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+{% block title %}ATI Delivery · CRM — {{ carrier.name }}{% endblock %}
+{% block body %}
+<div class="card split">
+  <div>
+    <div class="mut"><a href="/carriers">← Перевозчики</a></div>
+    <h1>{{ carrier.name }}</h1>
+    <p class="mut">{{ carrier.kind_label }} · ИНН {{ carrier.inn }} · {{ carrier.phone }}{% if carrier.email %} · {{ carrier.email }}{% endif %}</p>
+    <p class="src">Сканы СТС лежат на ТС, паспорт и ВУ — на водителе. В PDF они не вшиваются.</p>
+  </div>
+  <form method="get" action="/carriers/{{ carrier.id }}/kartochka.pdf">
+    {% if carrier.vehicles|length != 1 %}
+    <div class="field">
+      <label for="pdf-vehicle">ТС для PDF</label>
+      <select id="pdf-vehicle" name="vehicle_id">
+        {% for vehicle in carrier.vehicles %}
+        <option value="{{ vehicle.id }}">{{ vehicle.plate }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    {% endif %}
+    {% if carrier.drivers|length != 1 %}
+    <div class="field">
+      <label for="pdf-driver">Водитель для PDF</label>
+      <select id="pdf-driver" name="driver_id">
+        {% for driver in carrier.drivers %}
+        <option value="{{ driver.id }}">{{ driver.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    {% endif %}
+    <button class="btn" type="submit">Скачать PDF карточку</button>
+  </form>
+</div>
+<nav class="haul" aria-label="Вкладки карточки">
+  <a class="f {% if tab == 'vehicles' %}on{% endif %}" href="/carriers/{{ carrier.id }}?tab=vehicles">ТС</a>
+  <a class="f {% if tab == 'drivers' %}on{% endif %}" href="/carriers/{{ carrier.id }}?tab=drivers">Водители</a>
+  <a class="f {% if tab == 'docs' %}on{% endif %}" href="/carriers/{{ carrier.id }}?tab=docs">Документы</a>
+</nav>
+<div class="card">
+  <h2>Реквизиты</h2>
+  <form method="post" action="/carriers/{{ carrier.id }}">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    {% include "carrier_fields.html" %}
+    {% if can_write %}<p><button class="btn" type="submit">Сохранить реквизиты</button></p>{% endif %}
+  </form>
+  {% if can_write %}
+  <form method="post" action="/carriers/{{ carrier.id }}/delete">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button class="btn ghost" type="submit">Удалить перевозчика</button>
+  </form>
+  {% endif %}
+</div>
+{% if tab == 'vehicles' %}
+<div class="card">
+  <h2>Транспорт</h2>
+  {% for vehicle in carrier.vehicles %}
+  <details class="fleet" {% if loop.first %}open{% endif %}>
+    <summary>{{ vehicle.plate }} · {{ vehicle.make_model }}</summary>
+    <form method="post" action="/carriers/{{ carrier.id }}/vehicles/{{ vehicle.id }}">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      {% with prefix='v' ~ vehicle.id, item=vehicle %}{% include "vehicle_fields.html" %}{% endwith %}
+      {% if can_write %}<p><button class="btn" type="submit">Сохранить ТС</button></p>{% endif %}
+    </form>
+    <p>
+      {% if vehicle.sts_file %}
+      <span class="badge yes">СТС есть</span>
+      <a class="dl" href="/fleet-files/{{ vehicle.sts_file.id }}">{{ vehicle.sts_file.original_name }}</a>
+      {% else %}
+      <span class="badge missing">нет скана СТС</span>
+      {% endif %}
+    </p>
+    {% if can_write %}
+    <form method="post" action="/carriers/{{ carrier.id }}/files" enctype="multipart/form-data">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="kind" value="sts">
+      <input type="hidden" name="vehicle_id" value="{{ vehicle.id }}">
+      <div class="field">
+        <label for="sts-{{ vehicle.id }}">Скан СТС, PDF, JPG или PNG</label>
+        <input id="sts-{{ vehicle.id }}" name="file" type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" required>
+      </div>
+      <p><button class="btn" type="submit">{% if vehicle.sts_file %}Заменить СТС{% else %}Загрузить СТС{% endif %}</button></p>
+    </form>
+    <form method="post" action="/carriers/{{ carrier.id }}/vehicles/{{ vehicle.id }}/delete">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button class="btn ghost" type="submit">Удалить ТС</button>
+    </form>
+    {% endif %}
+  </details>
+  {% else %}
+  <p class="mut">ТС пока нет.</p>
+  {% endfor %}
+  {% if can_write %}
+  <h2>Новое ТС</h2>
+  <form method="post" action="/carriers/{{ carrier.id }}/vehicles">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    {% with prefix='new', item=none %}{% include "vehicle_fields.html" %}{% endwith %}
+    <p><button class="btn" type="submit">Добавить ТС</button></p>
+  </form>
+  {% endif %}
+</div>
+{% elif tab == 'drivers' %}
+<div class="card">
+  <h2>Водители</h2>
+  {% for driver in carrier.drivers %}
+  <details class="fleet" {% if loop.first %}open{% endif %}>
+    <summary>{{ driver.name }}{% if driver.user_is_carrier %} · он же перевозчик{% endif %}</summary>
+    <form method="post" action="/carriers/{{ carrier.id }}/drivers/{{ driver.id }}">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      {% with prefix='d' ~ driver.id, item=driver %}{% include "driver_fields.html" %}{% endwith %}
+      {% if can_write %}<p><button class="btn" type="submit">Сохранить водителя</button></p>{% endif %}
+    </form>
+    <p>
+      {% if driver.passport_file %}<span class="badge yes">паспорт есть</span> <a class="dl" href="/fleet-files/{{ driver.passport_file.id }}">скан</a>{% else %}<span class="badge missing">нет скана паспорта</span>{% endif %}
+      {% if driver.license_file %}<span class="badge yes">ВУ есть</span> <a class="dl" href="/fleet-files/{{ driver.license_file.id }}">скан</a>{% else %}<span class="badge missing">нет скана ВУ</span>{% endif %}
+    </p>
+    {% if can_write %}
+    <form method="post" action="/carriers/{{ carrier.id }}/files" enctype="multipart/form-data">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="kind" value="passport">
+      <input type="hidden" name="driver_id" value="{{ driver.id }}">
+      <div class="field"><label for="pass-{{ driver.id }}">Скан паспорта</label><input id="pass-{{ driver.id }}" name="file" type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" required></div>
+      <p><button class="btn" type="submit">{% if driver.passport_file %}Заменить паспорт{% else %}Загрузить паспорт{% endif %}</button></p>
+    </form>
+    <form method="post" action="/carriers/{{ carrier.id }}/files" enctype="multipart/form-data">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="kind" value="license">
+      <input type="hidden" name="driver_id" value="{{ driver.id }}">
+      <div class="field"><label for="lic-{{ driver.id }}">Скан ВУ</label><input id="lic-{{ driver.id }}" name="file" type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" required></div>
+      <p><button class="btn" type="submit">{% if driver.license_file %}Заменить ВУ{% else %}Загрузить ВУ{% endif %}</button></p>
+    </form>
+    <form method="post" action="/carriers/{{ carrier.id }}/drivers/{{ driver.id }}/delete">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button class="btn ghost" type="submit">Удалить водителя</button>
+    </form>
+    {% endif %}
+  </details>
+  {% else %}
+  <p class="mut">Водителей пока нет.</p>
+  {% endfor %}
+  {% if can_write %}
+  <h2>Новый водитель</h2>
+  <form method="post" action="/carriers/{{ carrier.id }}/drivers">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    {% with prefix='new', item=none %}{% include "driver_fields.html" %}{% endwith %}
+    <p><button class="btn" type="submit">Добавить водителя</button></p>
+  </form>
+  {% endif %}
+</div>
+{% else %}
+<div class="card">
+  <h2>Документы</h2>
+  <p class="mut">Произвольный пакет файлов перевозчика. Сканы СТС, паспорта и ВУ — на вкладках ТС и водителей.</p>
+  {% if not carrier.files %}<p class="mut">Файлов пока нет.</p>{% endif %}
+  {% for file in carrier.files %}
+  <div class="doc"><b>{{ file.original_name }}</b> <a class="dl" href="/fleet-files/{{ file.id }}">Скачать</a></div>
+  {% endfor %}
+  {% if can_write %}
+  <form method="post" action="/carriers/{{ carrier.id }}/files" enctype="multipart/form-data">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="kind" value="doc">
+    <div class="field"><label for="doc-file">Файл PDF, JPG или PNG</label><input id="doc-file" name="file" type="file" required accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"></div>
+    <p><button class="btn" type="submit">Приложить</button></p>
+  </form>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

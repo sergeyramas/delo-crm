@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}ATI Delivery · CRM — переговоры {{ p.number }}{% endblock %}
+{% block body %}
+<div class="card split">
+  <div>
+    <div class="mut"><a href="/packages/{{ p.id }}">← Сделка {{ p.number }}</a></div>
+    <h1>Переговоры · {{ p.number }}</h1>
+    <p class="mut">Заметки и договорённости по заявке: дата, автор, текст. Внешних каналов нет, письмо отсюда не уходит.</p>
+  </div>
+</div>
+<div class="card">
+  {% if not notes %}<p class="mut">Заметок пока нет.</p>{% endif %}
+  {% for note in notes %}
+  <div class="msg">
+    <b>{{ note.author or "CRM" }}</b> <span class="mut">{{ note.when }}</span>
+    <div>{{ note.text }}</div>
+  </div>
+  {% endfor %}
+</div>
+{% if can_write %}
+<div class="card">
+  <h2>Новая заметка</h2>
+  <form method="post" action="/packages/{{ p.id }}/negotiations">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <div class="field"><label for="nego-text">Текст</label><textarea id="nego-text" name="text" required maxlength="4000"></textarea></div>
+    <p><button class="btn" type="submit">Записать</button></p>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

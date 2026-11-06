@@ -63,6 +63,13 @@ CREATE TABLE IF NOT EXISTS packages (
     stage_times_json TEXT NOT NULL DEFAULT '{}',
     carrier_party_id INTEGER,
     driver_party_id INTEGER,
+    carrier_id INTEGER,
+    vehicle_id INTEGER,
+    driver_id INTEGER,
+    cargo_volume TEXT NOT NULL DEFAULT '',
+    load_window TEXT NOT NULL DEFAULT '',
+    payment_terms TEXT NOT NULL DEFAULT '',
+    shipper_contact TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     UNIQUE(year, seq)
@@ -198,6 +205,118 @@ CREATE TABLE IF NOT EXISTS party_scans (
     created_at TEXT NOT NULL,
     UNIQUE(party_id, kind)
 );
+
+CREATE TABLE IF NOT EXISTS expeditor (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    name TEXT NOT NULL DEFAULT '',
+    inn TEXT NOT NULL DEFAULT '',
+    ogrnip TEXT NOT NULL DEFAULT '',
+    address TEXT NOT NULL DEFAULT '',
+    bank TEXT NOT NULL DEFAULT '',
+    account TEXT NOT NULL DEFAULT '',
+    bik TEXT NOT NULL DEFAULT '',
+    corr_account TEXT NOT NULL DEFAULT '',
+    phone TEXT NOT NULL DEFAULT '',
+    email TEXT NOT NULL DEFAULT '',
+    dispatcher_name TEXT NOT NULL DEFAULT '',
+    dispatcher_phone TEXT NOT NULL DEFAULT '',
+    ati_code TEXT NOT NULL DEFAULT '',
+    edo_id TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS carriers (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL DEFAULT '',
+    kind TEXT NOT NULL DEFAULT '',
+    inn TEXT NOT NULL DEFAULT '',
+    ogrn TEXT NOT NULL DEFAULT '',
+    phone TEXT NOT NULL DEFAULT '',
+    email TEXT NOT NULL DEFAULT '',
+    max_contact TEXT NOT NULL DEFAULT '',
+    tg_contact TEXT NOT NULL DEFAULT '',
+    wa_contact TEXT NOT NULL DEFAULT '',
+    note TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS vehicles (
+    id INTEGER PRIMARY KEY,
+    carrier_id INTEGER NOT NULL REFERENCES carriers(id) ON DELETE CASCADE,
+    make_model TEXT NOT NULL DEFAULT '',
+    body TEXT NOT NULL DEFAULT '',
+    volume TEXT NOT NULL DEFAULT '',
+    loading TEXT NOT NULL DEFAULT '',
+    plate TEXT NOT NULL DEFAULT '',
+    trailer_plate TEXT NOT NULL DEFAULT '',
+    vin TEXT NOT NULL DEFAULT '',
+    sts_series TEXT NOT NULL DEFAULT '',
+    sts_number TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS drivers (
+    id INTEGER PRIMARY KEY,
+    carrier_id INTEGER NOT NULL REFERENCES carriers(id) ON DELETE CASCADE,
+    name TEXT NOT NULL DEFAULT '',
+    birth_date TEXT NOT NULL DEFAULT '',
+    phone TEXT NOT NULL DEFAULT '',
+    passport_series TEXT NOT NULL DEFAULT '',
+    passport_number TEXT NOT NULL DEFAULT '',
+    passport_issued_by TEXT NOT NULL DEFAULT '',
+    passport_issued_at TEXT NOT NULL DEFAULT '',
+    passport_dept_code TEXT NOT NULL DEFAULT '',
+    license_series TEXT NOT NULL DEFAULT '',
+    license_number TEXT NOT NULL DEFAULT '',
+    license_issued_at TEXT NOT NULL DEFAULT '',
+    license_issued_by TEXT NOT NULL DEFAULT '',
+    license_valid_until TEXT NOT NULL DEFAULT '',
+    license_categories TEXT NOT NULL DEFAULT '',
+    consent INTEGER NOT NULL DEFAULT 0,
+    consent_at TEXT NOT NULL DEFAULT '',
+    user_is_carrier INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS fleet_files (
+    id INTEGER PRIMARY KEY,
+    owner_kind TEXT NOT NULL,
+    owner_id INTEGER NOT NULL,
+    file_kind TEXT NOT NULL,
+    stored_name TEXT NOT NULL,
+    original_name TEXT NOT NULL,
+    content_type TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS negotiations (
+    id INTEGER PRIMARY KEY,
+    package_id INTEGER NOT NULL REFERENCES packages(id) ON DELETE CASCADE,
+    author TEXT NOT NULL DEFAULT '',
+    body TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS package_doc_tracks (
+    id INTEGER PRIMARY KEY,
+    package_id INTEGER NOT NULL REFERENCES packages(id) ON DELETE CASCADE,
+    recipient TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT '',
+    channel TEXT NOT NULL DEFAULT '',
+    status_at TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL,
+    UNIQUE(package_id, recipient)
+);
+
+CREATE INDEX IF NOT EXISTS idx_vehicles_carrier ON vehicles(carrier_id);
+CREATE INDEX IF NOT EXISTS idx_drivers_carrier ON drivers(carrier_id);
+CREATE INDEX IF NOT EXISTS idx_fleet_files_owner ON fleet_files(owner_kind, owner_id);
+CREATE INDEX IF NOT EXISTS idx_negotiations_pkg ON negotiations(package_id, id);
+CREATE INDEX IF NOT EXISTS idx_tracks_pkg ON package_doc_tracks(package_id);
 """
 
 
@@ -221,10 +340,23 @@ class Database:
 
     def _migrate(self) -> None:
         cols = {row["name"] for row in self.conn.execute("PRAGMA table_info(packages)")}
-        if "carrier_party_id" not in cols:
-            self.conn.execute("ALTER TABLE packages ADD COLUMN carrier_party_id INTEGER")
-        if "driver_party_id" not in cols:
-            self.conn.execute("ALTER TABLE packages ADD COLUMN driver_party_id INTEGER")
+        adds = {
+            "carrier_party_id": "carrier_party_id INTEGER",
+            "driver_party_id": "driver_party_id INTEGER",
+            "carrier_id": "carrier_id INTEGER",
+            "vehicle_id": "vehicle_id INTEGER",
+            "driver_id": "driver_id INTEGER",
+            "cargo_volume": "cargo_volume TEXT NOT NULL DEFAULT ''",
+            "load_window": "load_window TEXT NOT NULL DEFAULT ''",
+            "payment_terms": "payment_terms TEXT NOT NULL DEFAULT ''",
+            "shipper_contact": "shipper_contact TEXT NOT NULL DEFAULT ''",
+        }
+        for name, ddl in adds.items():
+            if name not in cols:
+                self.conn.execute(f"ALTER TABLE packages ADD COLUMN {ddl}")
+        self.conn.execute(
+            "INSERT OR IGNORE INTO expeditor (id, updated_at) VALUES (1, '')"
+        )
 
     def q(self, sql: str, args: tuple = ()) -> list[dict]:
         with self.lock:
