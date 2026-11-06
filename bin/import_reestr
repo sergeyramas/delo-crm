@@ -1,0 +1,14 @@
+#!/usr/bin/env python3
+"""Импорт CSV реестра. Секрет из INBOUND_SECRET или --secret-file, не из истории команд."""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from tools.import_reestr import main
+
+if __name__ == "__main__":
+    raise SystemExit(main())

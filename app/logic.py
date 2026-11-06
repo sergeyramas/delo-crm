@@ -129,6 +129,53 @@ def allocate_number(conn, year: int) -> tuple[int, str]:
     return seq, f"Д-{year}-{seq:04d}"
 
 
+# Явный номер импорта: Д-2026-0001. Латиница и «Д-2026-1» не принимаются,
+# иначе счётчик и UNIQUE(year, seq) разъедутся с allocate_number.
+PACKAGE_NUMBER_RE = re.compile(r"^Д-(\d{4})-(\d{4,})$")
+
+
+def canonical_number(value: str) -> tuple[int, int, str]:
+    raw = clean(value, 40).replace(" ", "")
+    match = PACKAGE_NUMBER_RE.fullmatch(raw)
+    if not match:
+        raise ApiError(422, "number в формате Д-ГГГГ-NNNN.")
+    year = int(match.group(1))
+    seq = int(match.group(2))
+    if year < 2000 or year > 2100 or seq < 1 or seq > 999_999:
+        raise ApiError(422, "number вне диапазона.")
+    number = f"Д-{year}-{seq:04d}" if seq < 10000 else f"Д-{year}-{seq}"
+    if number != raw:
+        raise ApiError(422, "number в формате Д-ГГГГ-NNNN.")
+    return year, seq, number
+
+
+def advance_counter(conn, year: int, seq: int) -> None:
+    """Поднять last_seq до seq, если он меньше. Импорт меньшего номера счётчик не откатывает."""
+    row = conn.execute("SELECT last_seq FROM year_counters WHERE year = ?", (year,)).fetchone()
+    if row is None:
+        conn.execute("INSERT INTO year_counters(year, last_seq) VALUES (?, ?)", (year, seq))
+    elif int(row["last_seq"]) < seq:
+        conn.execute("UPDATE year_counters SET last_seq = ? WHERE year = ?", (seq, year))
+
+
+def _truthy(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return value == 1
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return False
+
+
+def _attachment_label(item) -> str:
+    if isinstance(item, str):
+        return clean(item, 120) or "file"
+    if isinstance(item, dict):
+        return clean(item.get("name") or "file", 120) or "file"
+    return ""
+
+
 def touch_stage(raw: str, stage: str, moment: str) -> str:
     times = loads(raw, {})
     if not isinstance(times, dict):
@@ -431,6 +478,10 @@ def create_inbound(db: Database, settings: Settings, payload: dict) -> dict:
     text = clean(payload.get("text"), 8000)
     client_hint = clean(payload.get("client_hint"), 300)
     thread_id = clean(payload.get("thread_id"), 200)
+    explicit = None
+    if payload.get("number") not in (None, ""):
+        explicit = canonical_number(str(payload.get("number")))
+    idempotent = _truthy(payload.get("idempotent"))
     attachments = payload.get("attachments") or []
     if not isinstance(attachments, list):
         raise ApiError(422, "attachments должен быть списком.")
@@ -448,21 +499,35 @@ def create_inbound(db: Database, settings: Settings, payload: dict) -> dict:
             "driver_phone",
         )
     )
-    if not any([sender, subject, text, client_hint, attachments, identity]):
+    if not any([sender, subject, text, client_hint, attachments, identity, explicit]):
         raise ApiError(422, "Пустой пакет.")
     from_name, from_email = parse_from(sender)
     moment = now_iso()
-    year = int(moment[:4])
     written: list[Path] = []
     created = True
     try:
         with db.tx() as conn:
             existing = None
-            if thread_id:
+            if explicit:
+                row = conn.execute(
+                    "SELECT * FROM packages WHERE number = ?", (explicit[2],)
+                ).fetchone()
+                existing = dict(row) if row else None
+            if existing is None and thread_id:
                 row = conn.execute(
                     "SELECT * FROM packages WHERE thread_id = ?", (thread_id,)
                 ).fetchone()
                 existing = dict(row) if row else None
+                if existing and explicit and existing["number"] != explicit[2]:
+                    raise ApiError(409, "thread_id уже привязан к другому номеру.")
+            if existing and thread_id:
+                if existing["thread_id"] and existing["thread_id"] != thread_id:
+                    raise ApiError(409, "Номер уже привязан к другому thread_id.")
+                owner = conn.execute(
+                    "SELECT id FROM packages WHERE thread_id = ?", (thread_id,)
+                ).fetchone()
+                if owner is not None and int(owner["id"]) != int(existing["id"]):
+                    raise ApiError(409, "thread_id уже привязан к другому номеру.")
             from app.parties import sync_package_parties
 
             if existing:
@@ -472,13 +537,18 @@ def create_inbound(db: Database, settings: Settings, payload: dict) -> dict:
                 status = existing["status"]
                 fill = {}
                 for key in ("route_from", "route_to", "cargo", "weight", "pallets", "load_date", "subject"):
-                    value = clean(payload.get(key), TEXT_LIMITS.get(key, 300))
                     if key == "subject":
                         value = subject
+                    elif key == "load_date":
+                        value = _date_or_blank(payload.get("load_date"))
+                    else:
+                        value = clean(payload.get(key), TEXT_LIMITS.get(key, 300))
                     if value and not existing[key]:
                         fill[key] = value
                 if payload.get("rate_rub") not in (None, "") and existing["rate_rub"] is None:
                     fill["rate_rub"] = opt_int(payload.get("rate_rub"), "rate_rub")
+                if thread_id and not existing["thread_id"]:
+                    fill["thread_id"] = thread_id
                 fill.update(sync_package_parties(
                     conn,
                     settings,
@@ -497,7 +567,18 @@ def create_inbound(db: Database, settings: Settings, payload: dict) -> dict:
                         (*fill.values(), moment, package_id),
                     )
             else:
-                seq, number = allocate_number(conn, year)
+                if explicit:
+                    year, seq, number = explicit
+                    clash = conn.execute(
+                        "SELECT number FROM packages WHERE year = ? AND seq = ?",
+                        (year, seq),
+                    ).fetchone()
+                    if clash is not None:
+                        raise ApiError(409, "Этот порядковый номер уже занят.")
+                    advance_counter(conn, year, seq)
+                else:
+                    year = int(moment[:4])
+                    seq, number = allocate_number(conn, year)
                 linked = sync_package_parties(
                     conn,
                     settings,
@@ -553,24 +634,45 @@ def create_inbound(db: Database, settings: Settings, payload: dict) -> dict:
                     ),
                 )
                 package_id = int(cur.lastrowid)
+            known_files: set[str] = set()
+            if existing and idempotent:
+                known_files = {
+                    row["original_name"]
+                    for row in conn.execute(
+                        "SELECT original_name FROM files WHERE package_id = ?",
+                        (package_id,),
+                    )
+                }
             stored = []
             for item in attachments:
+                label = _attachment_label(item)
+                if label and label in known_files:
+                    continue
                 meta = _store_attachment(db, conn, package_id, item, moment, written)
                 stored.append(meta)
+                if label:
+                    known_files.add(label)
             event_type = {"mail": "mail_in", "tg": "tg", "manual": "note"}[source]
             title = {"mail": "Входящее письмо", "tg": "Telegram", "manual": "Ручной ввод"}[source]
             body = text or subject or "Пакет без текста."
-            add_event(
-                conn,
-                package_id,
-                event_type,
-                body,
-                sender or "inbound",
-                title,
-                moment,
-                stored,
-                {"group": "mail" if source == "mail" else ("tg" if source == "tg" else "agent"), "source": source},
-            )
+            duplicate_event = False
+            if existing and idempotent and not stored:
+                duplicate_event = conn.execute(
+                    "SELECT 1 FROM events WHERE package_id = ? AND type = ? AND text = ? LIMIT 1",
+                    (package_id, event_type, clean(body, 8000)),
+                ).fetchone() is not None
+            if not duplicate_event:
+                add_event(
+                    conn,
+                    package_id,
+                    event_type,
+                    body,
+                    sender or "inbound",
+                    title,
+                    moment,
+                    stored,
+                    {"group": "mail" if source == "mail" else ("tg" if source == "tg" else "agent"), "source": source},
+                )
             if not existing:
                 add_event(
                     conn,
