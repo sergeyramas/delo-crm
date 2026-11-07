@@ -2,11 +2,11 @@
 
 Мини-CRM пакетов документов: входящее → карточка со стадиями → список, воронка, карточка, лента. Это не лиды AlpStream и не UTM.
 
-Хост: Ядро `77.91.113.64`, домен `crm.77-91-113-64.sslip.io`, приложение только на `127.0.0.1`. Наружу смотрит nginx. Почту клиентам и перевозчикам CRM не отправляет. Telegram-бот на этот хост не переносится.
+Хост: Ядро `77.91.113.64`, домен `crm.77-91-113-64.sslip.io`, приложение только на `127.0.0.1`. Наружу смотрит nginx в Docker: конфиг в `/data/nginx/user_conf.d/`, upstream `172.18.0.1:8091`. Почту клиентам и перевозчикам CRM не отправляет. Telegram-бот на этот хост не переносится.
 
 ## Порт для Вишну
 
-**8091** на **127.0.0.1**. Снаружи только nginx, URL `https://crm.77-91-113-64.sslip.io`. Если порт занят, поменяйте `PORT` в env и `server 127.0.0.1:8091` в nginx вместе. В firewall порт не открывать.
+**8091** на **127.0.0.1** хоста (uvicorn). Снаружи Docker-nginx, URL `https://crm.77-91-113-64.sslip.io`, прокси на `172.18.0.1:8091` (шлюз моста до приложения). Если порт занят, поменяйте `PORT` в env и `server 172.18.0.1:ПОРТ` в файле `/data/nginx/user_conf.d/` вместе. В firewall порт не открывать. Host-nginx и `/etc/nginx/sites-available` на Ядре не используются.
 
 ## Память
 
@@ -131,13 +131,12 @@ curl -sS -H "Content-Type: application/json" \
 
 Вложения: `Д-2026-0001-*.pdf` и файлы `01-…`, `02-…`, `03-…`, `04-…` без переименования. Префикс `NN-` клеится к единственному номеру в CSV. Если номеров несколько, имя файла должно быть в `attachments` этого JSON. Отдельный файл: `--attach Д-2026-0001=/ПУТЬ/файл.pdf` или `--attach /ПУТЬ/файл.pdf`, когда в CSV один номер. Повтор не прикладывает тот же файл второй раз.
 
-На Ядре nginx пускает `/s/` только с `127.0.0.1`. Команда бьёт в живое имя `https://crm.77-91-113-64.sslip.io`, а TCP открывает на loopback (`--connect`), иначе nginx ответит 403. Секрет читается из файла, в команду его не подставлять. Сначала сухой прогон:
+С Ядра шлюз открыт на самом приложении, `http://127.0.0.1:8091`, мимо Docker-nginx. Секрет читается из файла, в команду его не подставлять. Через nginx тот же импорт ходит на живое имя и открывает TCP на `127.0.0.1` хоста (`--connect`): это опубликованный порт контейнера. Внутри nginx источник уже не `127.0.0.1` (это сам контейнер), поэтому `location /s/` пускает шлюз моста `172.18.0.1` и сеть `172.18.0.0/16`, остальным отвечает 403. Экран (`location /`) этим списком не закрыт. Живой файл правят в `/data/nginx/user_conf.d/`, не в `/etc/nginx/sites-available`. Сначала сухой прогон:
 
 ```sh
 cd /srv/delo-crm
 .venv/bin/python bin/import_reestr /ПУТЬ/reestr.csv \
-  --base-url https://crm.77-91-113-64.sslip.io \
-  --connect 127.0.0.1 \
+  --base-url http://127.0.0.1:8091 \
   --docs-dir /ПУТЬ/files \
   --payload-json /ПУТЬ/payload-Д-2026-0001.json \
   --dry-run
@@ -150,6 +149,17 @@ cd /srv/delo-crm
 ```sh
 cd /srv/delo-crm
 .venv/bin/python bin/import_reestr /ПУТЬ/reestr.csv \
+  --base-url http://127.0.0.1:8091 \
+  --secret-file /root/ati/secrets/delo-crm.env \
+  --docs-dir /ПУТЬ/files \
+  --payload-json /ПУТЬ/payload-Д-2026-0001.json
+```
+
+`--secret-file` понимает строку секрета или env-файл, где есть `INBOUND_SECRET`. Тот же ключ можно положить в окружение процесса (`INBOUND_SECRET` или `DELO_CRM_INBOUND_SECRET`), не в argv. Импорт мимо nginx — команда выше. Тот же прогон через docker-nginx, с хоста Ядра:
+
+```sh
+cd /srv/delo-crm
+.venv/bin/python bin/import_reestr /ПУТЬ/reestr.csv \
   --base-url https://crm.77-91-113-64.sslip.io \
   --connect 127.0.0.1 \
   --secret-file /root/ati/secrets/delo-crm.env \
@@ -157,7 +167,7 @@ cd /srv/delo-crm
   --payload-json /ПУТЬ/payload-Д-2026-0001.json
 ```
 
-`--secret-file` понимает строку секрета или env-файл, где есть `INBOUND_SECRET`. Тот же ключ можно положить в окружение процесса (`INBOUND_SECRET` или `DELO_CRM_INBOUND_SECRET`), не в argv. Прямой обход nginx, та же база: `--base-url http://127.0.0.1:8091` без `--connect`.
+`--connect 127.0.0.1` здесь — адрес хоста, не правило `allow` внутри контейнера. В nginx для `/s/` нужно `allow 172.18.0.1` и `allow 172.18.0.0/16`. `allow 127.0.0.1` в контейнере импорт с хоста не пустит.
 
 В конце одна строка `created=… updated=… attached=… errors=…`. Ненулевые ошибки — код выхода 1. `python -m app.seed` на эту базу не запускать.
 
@@ -167,8 +177,8 @@ cd /srv/delo-crm
 
 Один из двух способов, не оба сразу, чтобы не было двойного пароля.
 
-1. **nginx basic** (так в примере конфига). `AUTH_MODE=proxy`, `UI_GATE_SECRET` пустой. Приложение слушает только loopback, пароль спрашивает nginx (`htpasswd`). С машины на `127.0.0.1:8091` UI открыт тем, у кого есть shell.
-2. **Пароль приложения.** `AUTH_MODE=basic`. Nginx без `auth_basic`. Заголовок `WWW-Authenticate`. `/health` и `/s/*` пароль экрана не спрашивают: шлюз закрыт своим секретом.
+1. **Пароль приложения.** `AUTH_MODE=basic`. Docker-nginx на Ядре пароль сам не спрашивает, экран закрывает приложение. Заголовок `WWW-Authenticate`. `/health` и `/s/*` пароль экрана не спрашивают: шлюз закрыт своим секретом. Уже записанный `AUTH_MODE` в env на сервере при выкладке не переписывать.
+2. **htpasswd на host-nginx** — только устаревший файл `deploy/nginx-crm.77-91-113-64.sslip.io.conf` (`AUTH_MODE=proxy`). На Ядро его не ставить: копирование ломает прод. С машины на `127.0.0.1:8091` UI открыт тем, у кого есть shell.
 
 Учётки экрана — Сергей и Андрей, оба с ролью `admin` (в шапке «Админ»). Рядом в таблице `roles` остаются `dispatcher` («Диспетчер») и `operator` («Оператор»). Отдельного ACL по экранам нет: оба видят одни и те же сделки. Это задел, не матрица прав.
 
@@ -227,7 +237,7 @@ curl -sS -H "X-Inbound-Secret: $INBOUND_SECRET" \
 
 `{id}` в пути — номер `Д-2026-0001` или числовой id. Ответ: `attachments` (только то, что уже есть) и `missing` (`sts`, `license`, `passport`, если файла нет). У каждого вложения есть `type`, `filename`, `size`, `content_type`, `download_url`. Типы: `org_card`, `sts`, `license`, `passport`. Скачивание — тот же URL с типом на конце, тело файла, `Content-Disposition: attachment`.
 
-Вход на `/api/*` такой же, как на экраны (`AUTH_MODE`), либо заголовок `X-Inbound-Secret`, если секрет длиннее 16 символов. Секрет в query не принимается. Сканы с экрана (`/parties/{id}/scans/...`) секрет шлюза не открывает: их смотрят только после входа в UI. Через nginx `/api/` сидит под тем же паролем, что и экраны. Воркер на Ядре ходит мимо nginx, на `http://127.0.0.1:8091`, с секретом.
+Вход на `/api/*` такой же, как на экраны (`AUTH_MODE`), либо заголовок `X-Inbound-Secret`, если секрет длиннее 16 символов. Секрет в query не принимается. Сканы с экрана (`/parties/{id}/scans/...`) секрет шлюза не открывает: их смотрят только после входа в UI. Docker-nginx на Ядре пароль htpasswd не спрашивает: `/api/` доходит до приложения с тем же `AUTH_MODE`, что и экраны. Воркер на Ядре ходит мимо nginx, на `http://127.0.0.1:8091`, с секретом.
 
 ## Перевозчики
 
@@ -300,7 +310,8 @@ curl -sS -H "Content-Type: application/json" \
 | Секреты приложения | `/root/ati/secrets/delo-crm.env` (mode `600`) |
 | Пароли Сергея и Андрея | `/root/ati/secrets/delo-crm-auth.env` (mode `600`) |
 | Старый файл, если уже создан | `/srv/ati/secrets/delo-crm.env` — юнит его тоже читает |
-| htpasswd nginx | `/srv/ati/secrets/delo-crm.htpasswd` (не в `/root`: www-data туда не зайдёт) |
+| nginx CRM на Ядре | `/data/nginx/user_conf.d/` внутри Docker. Образец: `deploy/nginx-crm.yadro-docker.conf` |
+| htpasswd | на Ядре не используется. Старый шаблон host-nginx его описывает, создавать файл не нужно |
 
 В env боевого хоста:
 
@@ -310,7 +321,7 @@ PORT=8091
 DATA_DIR=/srv/delo-crm
 SQLITE_PATH=/srv/delo-crm/delo.db
 INBOUND_SECRET=
-AUTH_MODE=proxy
+# AUTH_MODE на Ядре не переключать. htpasswd и proxy из старого шаблона host-nginx сюда не переносить.
 NOTIFY_TG=0
 ```
 
@@ -335,13 +346,29 @@ sudo install -m 600 /dev/null /root/ati/secrets/delo-crm-auth.env
 sudo cp deploy/delo-crm.service /etc/systemd/system/delo-crm.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now delo-crm
-sudo cp deploy/nginx-crm.77-91-113-64.sslip.io.conf /etc/nginx/sites-available/delo-crm.conf
-sudo ln -s /etc/nginx/sites-available/delo-crm.conf /etc/nginx/sites-enabled/delo-crm.conf
-sudo htpasswd -c /srv/ati/secrets/delo-crm.htpasswd andrey
-sudo nginx -t && sudo systemctl reload nginx
 ```
 
-После обновления кода достаточно перезапустить сервис: таблица `party_scans` создаётся при старте, отдельный SQL не нужен. Каталог `files/parties/` появится при первой загрузке скана. Сканы в git не коммитить и в `/srv` руками из репозитория не копировать — только через экран карточки водителя. В nginx `client_max_body_size 16m` (файл до 12 МиБ плюс форма).
+Nginx на Ядре — контейнер. Живой файл правят в `/data/nginx/user_conf.d/`. В `/etc/nginx/sites-available` его не кладут. Образец: `deploy/nginx-crm.yadro-docker.conf`.
+
+В живом `server` для `crm.77-91-113-64.sslip.io` должно быть:
+
+- upstream или `proxy_pass` на `172.18.0.1:8091`, не на `127.0.0.1:8091`
+- `client_max_body_size 16m` (на проде уже дописан вручную)
+- в `location /s/`: `allow 172.18.0.1;`, `allow 172.18.0.0/16;`, `deny all;`. Строку `allow 127.0.0.1` убрать: внутри контейнера это сам nginx, импорт с хоста получит 403. Если IP импорта уже известен точнее, оставьте его вместо сети `/16`
+- `location /` без `allow` и без `deny`, иначе закроется экран
+
+`deploy/nginx-crm.77-91-113-64.sslip.io.conf` не копировать: там upstream `127.0.0.1:8091`, listen 80 и пароль nginx. Это ломает прод. `systemctl reload nginx` не использовать. Файл пароля nginx для CRM не создавать и на `server` не вешать: в контейнере его нет, экран пропадёт. Если пароль на живом `server` уже стоит, в `location /s/` оставьте `auth_basic off`, экран не трогайте.
+
+Файл в `/data/nginx/user_conf.d/` не затирать целиком, если в нём уже есть TLS. Имя файла и имя контейнера в репозитории не заданы (плейсхолдер ниже).
+
+```sh
+# Имя контейнера nginx на Ядре подставить вместо плейсхолдера.
+# Посмотреть: docker ps — контейнер, у которого смонтирован /data/nginx.
+docker exec ИМЯ_КОНТЕЙНЕРА_NGINX_НА_ЯДРЕ nginx -t \
+  && docker exec ИМЯ_КОНТЕЙНЕРА_NGINX_НА_ЯДРЕ nginx -s reload
+```
+
+После обновления кода достаточно перезапустить сервис: таблица `party_scans` создаётся при старте, отдельный SQL не нужен. Каталог `files/parties/` появится при первой загрузке скана. Сканы в git не коммитить и в `/srv` руками из репозитория не копировать — только через экран карточки водителя. Лимит тела в docker-nginx: `client_max_body_size 16m` (файл до 12 МиБ плюс форма).
 
 ```sh
 sudo systemctl restart delo-crm

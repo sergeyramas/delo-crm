@@ -435,8 +435,33 @@ def test_docs_point_at_live_host_without_secrets():
     doc = (ROOT / "docs" / "WORKER-CRM-SYNC.md").read_text(encoding="utf-8")
     assert "https://crm.77-91-113-64.sslip.io" in readme
     assert "bin/import_reestr" in readme
-    assert "--connect 127.0.0.1" in readme
+    assert "--base-url http://127.0.0.1:8091" in readme
     assert "--secret-file /root/ati/secrets/delo-crm.env" in readme
+    assert "/data/nginx/user_conf.d/" in readme
+    assert "172.18.0.1:8091" in readme
+    assert "client_max_body_size 16m" in readme
+    assert "allow 172.18.0.0/16" in readme
+    assert "/etc/nginx/sites-available" in readme
+    assert "ИМЯ_КОНТЕЙНЕРА_NGINX_НА_ЯДРЕ" in readme
+    assert "sudo cp deploy/nginx-crm" not in readme
+    assert "sudo cp deploy/nginx-crm" not in doc
+    nginx = (ROOT / "deploy" / "nginx-crm.yadro-docker.conf").read_text(encoding="utf-8")
+    obsolete = (ROOT / "deploy" / "nginx-crm.77-91-113-64.sslip.io.conf").read_text(encoding="utf-8")
+    assert "server 172.18.0.1:8091" in nginx
+    assert "server_name crm.77-91-113-64.sslip.io" in nginx
+    assert "client_max_body_size 16m" in nginx
+    assert "/data/nginx/user_conf.d/" in nginx
+    assert "/etc/nginx/sites-available" in nginx
+    gateway, ui = nginx.split("location /s/ {", 1)[1].split("location / {", 1)
+    assert "allow 172.18.0.1;" in gateway
+    assert "allow 172.18.0.0/16;" in gateway
+    assert "allow 127.0.0.1" not in gateway
+    assert "deny all;" in gateway
+    assert "auth_basic off;" in gateway
+    assert "deny all" not in ui
+    assert "auth_basic_user_file" not in nginx
+    assert "delo-crm.htpasswd" not in nginx
+    assert obsolete.startswith("# УСТАРЕЛО. НЕ ДЛЯ ЯДРА. НЕ КОПИРОВАТЬ.")
     assert "DELO_CRM_URL" in doc
     assert "DELO_CRM_INBOUND_SECRET" in doc
     assert "X-Inbound-Secret" in doc
