@@ -10,6 +10,7 @@ from fastapi.responses import RedirectResponse
 from app.domain import fmt_dt
 from app.logic import ApiError
 from app.settings_catalog import BY_KEY, SECTIONS, render_preview
+from app.settings_constants import protected_rows
 from app.settings_store import (
     publish,
     reset,
@@ -77,6 +78,7 @@ def page_settings(request: Request):
     err, note = _message(request)
     ctx["err"] = err
     ctx["note"] = note
+    ctx["protected"] = protected_rows()
     ctx["sections"] = [
         {
             "code": code,

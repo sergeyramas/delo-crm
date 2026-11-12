@@ -6,9 +6,12 @@ import hmac
 import json
 
 from fastapi import APIRouter, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from app.logic import ApiError, apply_patch, create_inbound, detail, list_packages
+from app.settings_store import publish as publish_setting
+from app.settings_store import save_draft as save_setting_draft
+from app.settings_validate import ValidationError
 
 router = APIRouter()
 MIN_SECRET = 16
@@ -72,6 +75,58 @@ def settings_snapshot(request: Request):
 
     require_secret(request)
     return snapshot(request.app.state.db)
+
+
+def _settings_refusal(exc: ValidationError) -> JSONResponse:
+    """Отказ без пересказа запрещённого текста: только код и message."""
+    return JSONResponse(
+        {"code": getattr(exc, "code", "invalid"), "message": str(exc)},
+        status_code=422,
+    )
+
+
+async def _settings_body(request: Request) -> dict:
+    raw = await request.body()
+    if len(raw) > MAX_BODY:
+        raise ApiError(413, "Слишком большой запрос.")
+    try:
+        payload = json.loads(raw.decode("utf-8") or "{}")
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ApiError(422, "Не JSON.") from exc
+    if not isinstance(payload, dict):
+        raise ApiError(422, "Нужен объект JSON.")
+    return payload
+
+
+async def _settings_save(request: Request, key: str, *, force_draft: bool = False):
+    payload = await _settings_body(request)
+    require_secret(request, payload)
+    db = request.app.state.db
+    who = str(payload.get("actor") or "api")
+    comment = str(payload.get("comment") or "")
+    draft = force_draft or bool(payload.get("draft"))
+    try:
+        if draft:
+            value = save_setting_draft(db, key, payload.get("value"), who)
+            return {"key": key, "draft": True, "value": value}
+        return publish_setting(db, key, payload.get("value"), who, comment)
+    except ValidationError as exc:
+        return _settings_refusal(exc)
+
+
+@router.api_route("/s/settings/{key}", methods=["POST", "PATCH", "PUT"])
+async def settings_write(request: Request, key: str):
+    return await _settings_save(request, key)
+
+
+@router.post("/s/settings/{key}/draft")
+async def settings_draft(request: Request, key: str):
+    return await _settings_save(request, key, force_draft=True)
+
+
+@router.post("/s/settings/{key}/publish")
+async def settings_publish(request: Request, key: str):
+    return await _settings_save(request, key)
 
 
 @router.get("/s/packages")

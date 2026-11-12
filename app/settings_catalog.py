@@ -12,6 +12,8 @@ import re
 from dataclasses import dataclass
 from datetime import date
 
+from app.settings_constants import PROTECTED, PROTECTED_NAMES
+
 SECTIONS = (
     ("client", "Письмо заказчику"),
     ("mirror", "Заявка перевозчику"),
@@ -22,7 +24,7 @@ SECTIONS = (
 
 CLIENT_TEMPLATE_MD = """# Шаблон исходящего заказчику · send_client
 
-**От:** perevozki21ru@ya.ru
+**От:** {отправитель}
 **Кому:** {{to}}
 **Тема:** Заявка № {{zayavka}} {{route}}, {{dates}} ({{n}})
 **Вложение:** {{pdf_name}}
@@ -37,13 +39,13 @@ CLIENT_TEMPLATE_MD = """# Шаблон исходящего заказчику �
 Просим подтвердить получение и прислать подписанный скан в ответ на это письмо.
 
 С уважением,
-ИП Кртин А.С. / Перевозчик 21
+{подписант}
 Клиент: {{klient}}
 """
 
 MIRROR_TEMPLATE_MD = """# Шаблон исходящего перевозчику · send_mirror (зеркало)
 
-**От:** perevozki21ru@ya.ru
+**От:** {отправитель}
 **Кому:** {{to}}
 **Тема:** Заявка {{n}} / № {{zayavka}} — {{route}} (зеркало)
 **Вложение:** {{pdf_name}}
@@ -61,7 +63,7 @@ MIRROR_TEMPLATE_MD = """# Шаблон исходящего перевозчик
 Просим подтвердить получение и прислать подписанный скан в ответ на это письмо.
 
 С уважением,
-ИП Кртин А.С. / Перевозчик 21
+{подписант}
 """
 
 GROUP_REASONS = {
@@ -119,27 +121,9 @@ KEYS = (
         key="mail.client.body",
         title="Тело письма заказчику",
         type="template",
-        default="Добрый день!\n\nВо вложении: {file_name}.\n\nС уважением,\nИП Кртин А.С. («Перевозчик 21»)\n",
-        placeholders=("file_name",),
+        default="Добрый день!\n\nВо вложении: {file_name}.\n\nС уважением,\n{подписант}\n",
+        placeholders=("file_name", *PROTECTED_NAMES),
         max_len=4000,
-        section="client",
-    ),
-    SettingKey(
-        key="mail.client.signature",
-        title="Подпись в письме заказчику",
-        type="text",
-        default="С уважением,\nИП Кртин А.С. («Перевозчик 21»)",
-        placeholders=(),
-        max_len=1000,
-        section="client",
-    ),
-    SettingKey(
-        key="mail.from_name",
-        title="Имя отправителя",
-        type="text",
-        default="ИП Кртин А.С. («Перевозчик 21»)",
-        placeholders=(),
-        max_len=200,
         section="client",
     ),
     SettingKey(
@@ -149,7 +133,7 @@ KEYS = (
         default=CLIENT_TEMPLATE_MD,
         placeholders=(
             "to", "zayavka", "route", "dates", "n", "pdf_name",
-            "date_doc_clause", "gruz", "stavka", "klient",
+            "date_doc_clause", "gruz", "stavka", "klient", *PROTECTED_NAMES,
         ),
         max_len=20000,
         section="client",
@@ -168,7 +152,10 @@ KEYS = (
         title="Полный шаблон заявки перевозчику",
         type="template",
         default=MIRROR_TEMPLATE_MD,
-        placeholders=("to", "n", "zayavka", "route", "pdf_name", "gruz", "stavka", "klient"),
+        placeholders=(
+            "to", "n", "zayavka", "route", "pdf_name", "gruz", "stavka", "klient",
+            *PROTECTED_NAMES,
+        ),
         max_len=20000,
         section="mirror",
     ),
@@ -298,20 +285,30 @@ def parse_map(value: str) -> dict:
     return data
 
 
-TOKEN_RE = re.compile(r"\{\{\s*([A-Za-z0-9_]+)\s*\}\}|\{([A-Za-z0-9_]+)\}")
+TOKEN_RE = re.compile(r"\{\{\s*(\w+)\s*\}\}|\{(\w+)\}", re.UNICODE)
 
 
-def render_preview(item: SettingKey, value: str, today: date | None = None) -> str:
-    """Подставить синтетическое дело. Неизвестные подстановки не трогаем."""
-    moment = (today or date.today()).strftime("%d.%m.%Y")
-    sample = dict(SAMPLE)
-    sample["ts"] = moment
-    sample["dates"] = f"12.11–13.11.{moment[-4:]}"
-    sample["date_doc"] = moment
-    sample["date_doc_clause"] = f" от {moment}"
+def render_placeholders(value: str, values: dict[str, str]) -> str:
+    """Безопасная замена ``{имя}``/``{{имя}}`` строго по переданному белому списку.
+
+    Никакого ``str.format`` и Jinja: только регулярка и точное совпадение имени.
+    Неизвестные подстановки остаются как есть (их не пропустит валидация).
+    """
 
     def repl(match: re.Match[str]) -> str:
         name = match.group(1) or match.group(2)
-        return sample.get(name, match.group(0))
+        return values.get(name, match.group(0))
 
     return TOKEN_RE.sub(repl, value)
+
+
+def render_preview(item: SettingKey, value: str, today: date | None = None) -> str:
+    """Подставить синтетическое дело и защищённые реквизиты. Чужие имена не трогаем."""
+    moment = (today or date.today()).strftime("%d.%m.%Y")
+    values = dict(PROTECTED)
+    values.update(SAMPLE)
+    values["ts"] = moment
+    values["dates"] = f"12.11–13.11.{moment[-4:]}"
+    values["date_doc"] = moment
+    values["date_doc_clause"] = f" от {moment}"
+    return render_placeholders(value, values)

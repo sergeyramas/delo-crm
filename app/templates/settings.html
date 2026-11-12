@@ -4,6 +4,22 @@
 <h1>Настройки диспетчерской</h1>
 <p class="mut">Тексты, которые Дело берёт из CRM. Правка только у админа. Публикация — отдельным действием; до неё Дело видит прежнее значение.</p>
 
+<section class="card settings-section">
+  <h2>Защищённые подстановки</h2>
+  <p class="mut">Только чтение. Значения не редактируются через CRM и не попадают в snapshot: подставляйте в тексты как <code>{имя}</code>.</p>
+  <table class="table">
+    <thead><tr><th>Подстановка</th><th>Значение</th></tr></thead>
+    <tbody>
+      {% for row in protected %}
+      <tr>
+        <td><code>{{ "{" }}{{ row.name }}{{ "}" }}</code> · {{ row.label }}</td>
+        <td><pre class="settings-value">{{ row.value or "—" }}</pre></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
 {% for section in sections %}
 <section class="card settings-section">
   <h2>{{ section.title }}</h2>

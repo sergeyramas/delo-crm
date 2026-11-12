@@ -13,7 +13,7 @@ from app.settings_validate import ValidationError, validate_value
 def _spec(key: str) -> SettingKey:
     item = BY_KEY.get(key)
     if item is None:
-        raise ValidationError(f"Неизвестный ключ настройки: {key}.")
+        raise ValidationError(f"Неизвестный ключ настройки: {key}.", "unknown_key")
     return item
 
 
@@ -186,10 +186,13 @@ def rollback(db, key: str, history_id: int, who: str, comment: str = "") -> dict
 
 def snapshot(db) -> dict[str, Any]:
     rows = db.q("SELECT key, value FROM settings ORDER BY key")
+    # Только действующий каталог: старые ключи (например, подписант/From,
+    # которые стали защищёнными константами) в snapshot не попадают.
+    values = {row["key"]: row["value"] for row in rows if row["key"] in BY_KEY}
     return {
         "version": version(db),
         "generated_at": now_iso(),
-        "values": {row["key"]: row["value"] for row in rows},
+        "values": values,
     }
 
 
