@@ -8,7 +8,14 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.settings_catalog import BY_KEY, KEYS, default_text, render_placeholders, render_preview
-from app.settings_constants import PROTECTED, PROTECTED_NAMES, SENDER, SIGNER
+from app.settings_constants import (
+    PROTECTED,
+    PROTECTED_NAMES,
+    SENDER,
+    SIGNATURE_ENV,
+    protected_values,
+    signature_block,
+)
 from app.settings_store import (
     draft,
     history,
@@ -32,6 +39,17 @@ from app.settings_validate import (
     validate_value,
 )
 from tests.conftest import SECRET
+
+SYNTH_SIGNATURE = "--\nСинтетическая подпись\nТестовый подписант"
+
+
+@pytest.fixture(autouse=True)
+def signature_file(tmp_path, monkeypatch):
+    path = tmp_path / "signature.txt"
+    path.write_text(SYNTH_SIGNATURE + "\n", encoding="utf-8")
+    monkeypatch.setenv(SIGNATURE_ENV, str(path))
+    return path
+
 
 SIGNER_KEYS = ("mail.client.body", "mail.client.template_md", "mail.mirror.template_md")
 
@@ -271,7 +289,8 @@ def test_page_shows_protected_values_read_only(client):
     page = client.get("/settings")
     assert page.status_code == 200
     assert "Защищённые подстановки" in page.text
-    assert SIGNER in page.text
+    assert "Синтетическая подпись" in page.text
+    assert SENDER in page.text
     assert "mail.from_name" not in page.text
     assert "mail.client.signature" not in page.text
     assert 'name="value"' in page.text
@@ -284,7 +303,7 @@ def test_preview_uses_synthetic_deal_and_protected_values(client):
     assert "Д-2026-0001" in preview
     assert "{{" not in preview and "}}" not in preview
     assert date.today().strftime("%d.%m.%Y") in preview
-    assert SIGNER in preview
+    assert SYNTH_SIGNATURE in preview
     assert SENDER in preview
     assert "{подписант}" not in preview
     assert "{отправитель}" not in preview
@@ -292,9 +311,9 @@ def test_preview_uses_synthetic_deal_and_protected_values(client):
     body = render_preview(BY_KEY["mail.client.body"], default_text(BY_KEY["mail.client.body"]))
     assert "Д-2026-0001-zayavka.pdf" in body
     assert "{file_name}" not in body
-    assert SIGNER in body
+    assert SYNTH_SIGNATURE in body
 
-    assert render_placeholders("{подписант}", PROTECTED) == SIGNER
+    assert render_placeholders("{подписант}", PROTECTED) == SYNTH_SIGNATURE
     assert render_placeholders("{реквизиты}", PROTECTED) == ""
     assert render_placeholders("{неизвестно}", PROTECTED) == "{неизвестно}"
     assert render_placeholders("{подписант.__class__}", PROTECTED) == "{подписант.__class__}"
@@ -395,8 +414,35 @@ def test_settings_write_api_validates_and_protects_protected_keys(client):
         denied_key = client.post(
             f"/s/settings/{key}",
             headers=headers,
-            json={"value": f"{SIGNER}"},
+            json={"value": "{подписант}"},
         )
         assert denied_key.status_code == 422, key
         assert denied_key.json()["code"] == "unknown_key"
         assert key not in snapshot(client.app.state.db)["values"]
+
+
+def test_signature_block_from_file_with_empty_default(tmp_path, monkeypatch):
+    assert signature_block() == SYNTH_SIGNATURE
+    monkeypatch.delenv(SIGNATURE_ENV)
+    assert signature_block() == ""
+    assert render_placeholders("{подписант}", PROTECTED) == ""
+    monkeypatch.setenv(SIGNATURE_ENV, str(tmp_path / "missing.txt"))
+    assert signature_block() == ""
+    monkeypatch.setenv(SIGNATURE_ENV, "")
+    assert signature_block() == ""
+
+
+def test_signature_is_reread_and_sender_matches_prod_from(signature_file):
+    signature_file.write_text("Другая подпись\n", encoding="utf-8")
+    assert protected_values() == {"подписант": "Другая подпись", "отправитель": "Перевозчик 21", "реквизиты": ""}
+    assert SENDER == "Перевозчик 21"
+    assert "@" not in SENDER
+
+
+def test_no_signer_text_or_phone_hardcoded_in_constants():
+    import re
+    from pathlib import Path
+
+    src = Path(__file__).resolve().parents[1].joinpath("app", "settings_constants.py").read_text(encoding="utf-8")
+    assert "Кртин" not in src
+    assert not re.search(r"\+?\d[\d\s()-]{8,}\d", src)

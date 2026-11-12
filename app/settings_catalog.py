@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date
 
@@ -288,7 +289,7 @@ def parse_map(value: str) -> dict:
 TOKEN_RE = re.compile(r"\{\{\s*(\w+)\s*\}\}|\{(\w+)\}", re.UNICODE)
 
 
-def render_placeholders(value: str, values: dict[str, str]) -> str:
+def render_placeholders(value: str, values: Mapping[str, str]) -> str:
     """Безопасная замена ``{имя}``/``{{имя}}`` строго по переданному белому списку.
 
     Никакого ``str.format`` и Jinja: только регулярка и точное совпадение имени.
