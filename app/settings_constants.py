@@ -13,8 +13,10 @@
 
 from __future__ import annotations
 
+import os
+
 SIGNER = "ИП Кртин А.С. («Перевозчик 21»)"
-SENDER = "perevozki21ru@ya.ru"
+SENDER = os.environ.get("CRM_MAIL_SENDER", "")  # адрес — из окружения, в код не пишем
 REQUISITES = ""
 
 PROTECTED: dict[str, str] = {
