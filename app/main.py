@@ -17,10 +17,12 @@ from app.config import Settings
 from app.db import Database
 from app.logic import ApiError
 from app.parties import backfill
+from app.settings_ui import router as settings_router
 from app.ui import router as ui_router
 
 ROOT = Path(__file__).resolve().parents[1]
 OPEN_PATHS = {"/health", "/robots.txt"}
+VERSION = (ROOT / "VERSION").read_text(encoding="utf-8").strip() if (ROOT / "VERSION").exists() else "0.0.0"
 
 
 def _eq(left: str, right: str) -> bool:
@@ -91,7 +93,7 @@ def create_app() -> FastAPI:
     @app.get("/health")
     def health():
         db.q("SELECT 1")
-        return {"ok": True, "service": "delo-crm"}
+        return {"ok": True, "service": "delo-crm", "version": VERSION}
 
     @app.get("/robots.txt")
     def robots():
@@ -103,6 +105,7 @@ def create_app() -> FastAPI:
 
     app.include_router(api_router)
     app.include_router(carrier_pages_router)
+    app.include_router(settings_router)
     app.include_router(ui_router)
     app.mount("/static", StaticFiles(directory=str(ROOT / "app" / "static")), name="static")
     return app

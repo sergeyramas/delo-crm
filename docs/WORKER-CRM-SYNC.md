@@ -102,6 +102,54 @@ Nginx в `location /s/` пускает пакеты **только с 127.0.0.1*
 
 Потолок 8 МБ. Поле `url` CRM сохраняет и не скачивает.
 
+## Тексты настроек
+
+`GET {DELO_CRM_URL}/s/settings/snapshot`
+
+Тот же секрет и тот же способ, что у `/s/inbound/doc`: заголовок `X-Inbound-Secret`
+(поле `secret` в JSON для GET не используется). Без секрета — `401`, пока секрет
+короче 16 символов — `503`.
+
+```json
+{
+  "version": 7,
+  "generated_at": "2026-11-12T10:15:00+04:00",
+  "values": {
+    "group.checking": "⏳ Проверяю…"
+  }
+}
+```
+
+В `values` только опубликованные значения. Ключа, который ни разу не публиковали
+(или сбросили к умолчанию), в ответе нет: Дело само берёт своё умолчание. `version` —
+общий счётчик публикаций, растёт на каждой публикации, откате и сбросе. Значения типа
+`map` приходят строкой JSON. Воркеру достаточно сравнить `version` с прошлым снимком,
+чтобы понять, что тексты менялись.
+
+Подписант, отправитель и реквизиты — не настройки, а защищённые константы CRM:
+в текстах они пишутся как `{подписант}`, `{отправитель}`, `{реквизиты}`, в snapshot
+не попадают и через API не меняются. Тексты с этими подстановками приходят в `values`
+как есть: значение подставит получатель.
+
+### Правка через API
+
+Административный скрипт может сохранить черновик или опубликовать текст тем же
+секретом (`X-Inbound-Secret`):
+
+`POST|PATCH {DELO_CRM_URL}/s/settings/{key}`
+
+```json
+{"value": "⏳ Проверяю…", "comment": "из скрипта", "draft": false}
+```
+
+`draft: true` (или `POST /s/settings/{key}/draft`) кладёт значение в черновик.
+Успех — `{"key","version","value"}`, для черновика — `{"key","draft":true,"value"}`.
+Отказ — `422` и всегда `{"code": "...", "message": "..."}`. Коды: `unknown_placeholder`,
+`forbidden_word`, `link_not_allowed`, `requisites_not_allowed`, `missing_signer`,
+`too_long`, `empty`. Текст `message` не цитирует запрещённые слова и не перечисляет
+запрещённый список. Ключи `mail.from_name` и `mail.client.signature` удалены: запись
+по ним — `unknown_key`.
+
 ## Как вызвать с Hermes
 
 Скопировать на Hermes `app/sync_client.py` (только стандартная библиотека) или пару `app/sync_client.py` + `bin/crm_post_inbound`. Рядом с CRM импорт такой: `from app.sync_client import post_inbound, patch_package`. Если файл лежит один, каталог должен быть в `PYTHONPATH`, импорт `from sync_client import post_inbound, patch_package`.

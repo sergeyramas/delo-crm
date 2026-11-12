@@ -266,3 +266,21 @@ a.f.is-on.f-loose{background:#b45309;color:#fff}
   .tl div.st-originaly{border-left-color:#a16207}
   .doc{flex-direction:column;align-items:flex-start;gap:6px}
 }
+
+.settings-section h2{margin-bottom:16px}
+.settings-key{border-top:1px solid #e2e8f0;padding:16px 0}
+.settings-key:first-of-type{border-top:0;padding-top:0}
+.settings-key h3{margin:0 0 4px;font-size:15px}
+.settings-badges{display:flex;gap:6px;flex-wrap:wrap}
+.badge.changed{background:#ea580c}
+.settings-current{margin:12px 0}
+.settings-value{margin:6px 0 0;padding:12px;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc;white-space:pre-wrap;word-break:break-word;font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.settings-preview,.settings-history{margin:10px 0}
+.settings-preview summary,.settings-history summary{cursor:pointer;font-weight:700;min-height:32px}
+.settings-form{margin:12px 0;display:flex;flex-direction:column;gap:10px}
+.settings-form textarea{font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.settings-actions{display:flex;flex-wrap:wrap;gap:8px}
+.history-list{display:flex;flex-direction:column;gap:10px;margin-top:8px}
+.history-row{border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;background:#fff}
+.history-row form{margin:0}
+.diff{margin:8px 0 0;padding:10px;border-radius:8px;background:#0f172a;color:#e2e8f0;overflow:auto;font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
