@@ -66,6 +66,14 @@ async def inbound(request: Request):
     return create_inbound(request.app.state.db, request.app.state.settings, payload)
 
 
+@router.get("/s/settings/snapshot")
+def settings_snapshot(request: Request):
+    from app.settings_store import snapshot
+
+    require_secret(request)
+    return snapshot(request.app.state.db)
+
+
 @router.get("/s/packages")
 def packages(
     request: Request,

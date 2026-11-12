@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}Настройки · ATI Delivery{% endblock %}
+{% block body %}
+<h1>Настройки диспетчерской</h1>
+<p class="mut">Тексты, которые Дело берёт из CRM. Правка только у админа. Публикация — отдельным действием; до неё Дело видит прежнее значение.</p>
+
+{% for section in sections %}
+<section class="card settings-section">
+  <h2>{{ section.title }}</h2>
+  {% for card in section.cards %}
+  <article class="settings-key" id="{{ card.key }}">
+    <div class="split">
+      <div>
+        <h3>{{ card.title }}</h3>
+        <div class="mut">{{ card.key }} · {{ card.type }}{% if card.placeholders %} · подстановки: {% for p in card.placeholders %}<code>{{ p }}</code>{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}</div>
+      </div>
+      <div class="settings-badges">
+        {% if card.changed %}
+        <span class="badge changed">изменено</span>
+        {% else %}
+        <span class="badge unknown">по умолчанию</span>
+        {% endif %}
+        {% if card.published %}
+        <span class="badge sent">опубликовано · {{ card.published.version }}</span>
+        {% endif %}
+        {% if card.draft %}
+        <span class="badge gps-invited">есть черновик</span>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="settings-current">
+      <div class="mut">Сейчас в работе{% if not card.published %} (умолчание Дела){% endif %}</div>
+      <pre class="settings-value">{{ card.current_display }}</pre>
+    </div>
+
+    <details class="settings-preview">
+      <summary>Предпросмотр на синтетическом деле</summary>
+      <pre class="settings-value">{{ card.preview }}</pre>
+    </details>
+
+    <form class="settings-form" method="post" action="/settings/{{ card.key }}/draft">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label for="value-{{ loop.index }}-{{ section.code }}">Значение</label>
+      <textarea id="value-{{ loop.index }}-{{ section.code }}" name="value" rows="10">{{ card.draft_display or card.current_display }}</textarea>
+      <div class="field">
+        <label for="comment-{{ loop.index }}-{{ section.code }}">Комментарий к публикации (необязательно)</label>
+        <input type="text" id="comment-{{ loop.index }}-{{ section.code }}" name="comment" value="" maxlength="500">
+      </div>
+      <div class="settings-actions">
+        <button class="btn small ghost" type="submit" formaction="/settings/{{ card.key }}/draft">Сохранить черновик</button>
+        <button class="btn small" type="submit" formaction="/settings/{{ card.key }}/publish">Опубликовать</button>
+        <button class="btn small ghost" type="submit" formaction="/settings/{{ card.key }}/reset" formnovalidate>Сбросить к умолчанию</button>
+      </div>
+    </form>
+
+    <details class="settings-history">
+      <summary>История ({{ card.history|length }})</summary>
+      {% if card.history %}
+      <div class="history-list">
+        {% for row in card.history %}
+        <div class="history-row">
+          <div class="split">
+            <div>
+              <b>Версия {{ row.version }}</b>
+              <span class="mut">{{ row.who or "—" }} · {{ row.at_display }}</span>
+              {% if row.comment %}<div>{{ row.comment }}</div>{% endif %}
+            </div>
+            <form method="post" action="/settings/{{ card.key }}/rollback/{{ row.id }}">
+              <input type="hidden" name="csrf" value="{{ csrf }}">
+              <button class="btn small ghost" type="submit">Откатить к этой версии</button>
+            </form>
+          </div>
+          {% if row.diff %}<pre class="diff">{{ row.diff }}</pre>{% endif %}
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="mut">Публикаций ещё не было.</p>
+      {% endif %}
+    </details>
+  </article>
+  {% endfor %}
+</section>
+{% endfor %}
+{% endblock %}

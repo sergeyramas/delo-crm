@@ -393,6 +393,41 @@ CREATE TABLE IF NOT EXISTS gps_polls (
 CREATE INDEX IF NOT EXISTS idx_gps_points_pkg ON gps_points(package_id, id);
 CREATE INDEX IF NOT EXISTS idx_gps_drafts_party ON gps_drafts(party_id, id);
 CREATE INDEX IF NOT EXISTS idx_gps_polls_party ON gps_polls(party_id, id);
+
+-- Опубликованные тексты диспетчерской. Ключа нет — Дело берёт своё умолчание.
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    type TEXT NOT NULL,
+    value TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    updated_by TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS settings_drafts (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_by TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS settings_history (
+    id INTEGER PRIMARY KEY,
+    key TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    old_value TEXT NOT NULL DEFAULT '',
+    new_value TEXT NOT NULL,
+    who TEXT NOT NULL DEFAULT '',
+    at TEXT NOT NULL,
+    comment TEXT NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_settings_history_key ON settings_history(key, id);
+
+CREATE TABLE IF NOT EXISTS settings_version (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    version INTEGER NOT NULL DEFAULT 0
+);
 """
 
 
@@ -445,6 +480,9 @@ class Database:
             self.conn.execute("ALTER TABLE drivers ADD COLUMN gps_invited_at TEXT NOT NULL DEFAULT ''")
         self.conn.execute(
             "INSERT OR IGNORE INTO expeditor (id, updated_at) VALUES (1, '')"
+        )
+        self.conn.execute(
+            "INSERT OR IGNORE INTO settings_version (id, version) VALUES (1, 0)"
         )
 
     def q(self, sql: str, args: tuple = ()) -> list[dict]:
